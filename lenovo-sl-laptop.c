@@ -71,7 +71,7 @@ MODULE_LICENSE("GPL");
 /* parameters */
 
 static int debug_ec = 0; /* present EC debugging interface in procfs */
-static int control_backlight = 0; /* control the backlight (may conflict with video.ko) */
+static int control_backlight = 0; /* control the backlight (NB this may conflict with video.c) */
 module_param(debug_ec, bool, S_IRUGO);
 module_param(control_backlight, bool, S_IRUGO);
 
@@ -101,6 +101,7 @@ static int parse_strtoul(const char *buf,
 	return 0;
 }
 
+static struct input_dev *hkey_inputdev;
 
 /*************************************************************************
     bluetooth - copied nearly verbatim from thinkpad_acpi.c
@@ -370,6 +371,9 @@ static int bluetooth_init(void)
    uses the ACPI interface for controlling the backlight in a non-standard
    manner. See http://bugzilla.kernel.org/show_bug.cgi?id=12249  */
 
+#define	ACPI_VIDEO_NOTIFY_INC_BRIGHTNESS	0x86
+#define ACPI_VIDEO_NOTIFY_DEC_BRIGHTNESS	0x87
+
 acpi_handle lcdd_handle;
 struct backlight_device *backlight;
 static struct lensl_vector {
@@ -445,7 +449,7 @@ static inline int get_bqc(int *level)
 	return lensl_get_acpi_int(lcdd_handle, "_BQC", level);
 }
 
-/*backlight device sysfs support*/
+/* backlight device sysfs support */
 static int lensl_bd_get_brightness(struct backlight_device *bd)
 {
 	int level = 0;
@@ -456,25 +460,29 @@ static int lensl_bd_get_brightness(struct backlight_device *bd)
 	return level;
 }
 
-static int lensl_bd_set_brightness(struct backlight_device *bd)
+static int lensl_bd_set_brightness_int(int request_level)
 {
-	int request_level;
-	if (!bd)
-		return -EINVAL;
-
-	request_level = backlight_levels.count - bd->props.brightness - 1;
-	if (request_level >= 0 && request_level < backlight_levels.count) {
-		return set_bcm(backlight_levels.values[request_level]);
+	int n;
+	n = backlight_levels.count - request_level - 1;
+	if (n >= 0 && n < backlight_levels.count) {
+		return set_bcm(backlight_levels.values[n]);
 	}
 
 	return -EINVAL;
+}
+
+static int lensl_bd_set_brightness(struct backlight_device *bd)
+{
+	if (!bd)
+		return -EINVAL;
+
+	return lensl_bd_set_brightness_int(bd->props.brightness);
 }
 
 static struct backlight_ops lensl_backlight_ops = {
 	.get_brightness = lensl_bd_get_brightness,
 	.update_status  = lensl_bd_set_brightness,
 };
-
 
 static void backlight_exit(void)
 {
@@ -489,8 +497,9 @@ static void backlight_exit(void)
 static int
 backlight_init(void)
 {
-	int status;
+	int status = 0;
 
+	lcdd_handle = NULL;
 	backlight = NULL;
 	backlight_levels.count = 0;
 	backlight_levels.values = NULL;
@@ -509,13 +518,14 @@ backlight_init(void)
 			NULL, NULL, &lensl_backlight_ops);
 	backlight->props.max_brightness = backlight_levels.count - 1;
 	backlight->props.brightness = lensl_bd_get_brightness(backlight);
-	return 0;
 
+	goto out;
 err:
 	if (backlight_levels.count) {
 		kfree(backlight_levels.values);
 		backlight_levels.count = 0;
 	}
+out:
 	return status;
 }
 
@@ -523,7 +533,6 @@ err:
     hotkeys
  *************************************************************************/
 
-static struct input_dev *hkey_inputdev;
 static int hkey_poll_hz = 5;
 static u8 hkey_ec_prev_offset = 0;
 static struct mutex hkey_poll_mutex;
@@ -558,9 +567,9 @@ static struct key_entry ec_keymap[] = {
 	{KE_KEY, 0x6A, KEY_VOLUMEDOWN },
 	{KE_KEY, 0x6B, KEY_MUTE },
 	/* Fn Home; dispatches an ACPI event */
-	{KE_KEY, 0x6C, /*KEY_RESERVED*/ },
+	{KE_KEY, 0x6C, KEY_BRIGHTNESSDOWN /*KEY_RESERVED*/ },
 	/* Fn End; dispatches an ACPI event */
-	{KE_KEY, 0x6D, /*KEY_RESERVED*/ },
+	{KE_KEY, 0x6D, KEY_BRIGHTNESSUP /*KEY_RESERVED*/ },
 	/* Fn spacebar - zoom */	
 	{KE_KEY, 0x71, KEY_ZOOM },
 	/* Lenovo Care key */
@@ -635,7 +644,7 @@ static int hkey_ec_get_offset(void)
 static int hkey_poll_kthread(void *data)
 {
 	unsigned long t = 0;
-	int offset;
+	int offset, level;
 	unsigned int keycode;
 	u8 scancode;
 
@@ -671,6 +680,28 @@ static int hkey_poll_kthread(void *data)
 		}
 		keycode = ec_scancode_to_keycode(scancode);
 		printk(LENSL_DEBUG "Got hotkey keycode %d\n", keycode);
+
+		/* Special handling for brightness keys. We do it here and not
+		   via an ACPI notifier to prevent possible conflights with
+		   video.c */
+		if (keycode == KEY_BRIGHTNESSDOWN) {
+			if (control_backlight && backlight) {
+				level = lensl_bd_get_brightness(backlight);
+				if (0 <= --level)
+					lensl_bd_set_brightness_int(level);
+			}
+			else
+				keycode = KEY_RESERVED;
+		} else if (keycode == KEY_BRIGHTNESSUP) {
+			if (control_backlight && backlight) {
+				level = lensl_bd_get_brightness(backlight);
+				if (backlight_levels.count > ++level)
+					lensl_bd_set_brightness_int(level);
+			}
+			else
+				keycode = KEY_RESERVED;
+		}
+
 		if (keycode != KEY_RESERVED) {
 			/* TODO : handle KEY_UNKNOWN case */
 			input_report_key(hkey_inputdev, keycode, 1);
