@@ -4,7 +4,7 @@
  *
  *  Copyright (C) 2008-2009 Alexandre Rostovtsev
  *
- *  Based on thinkpad_acpi.c and eeepc-laptop.c which are copyright
+ *  Based on thinkpad_acpi.c, eeepc-laptop.c and video.c which are copyright
  *  their respective authors.
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -31,6 +31,7 @@
 #include <linux/init.h>
 #include <linux/acpi.h>
 #include <linux/rfkill.h>
+#include <linux/backlight.h>
 #include <linux/platform_device.h>
 
 #include <linux/input.h>
@@ -59,6 +60,7 @@ MODULE_LICENSE("GPL");
 
 #define LENSL_HKEY_FILE LENSL_MODULE_NAME
 #define LENSL_DRVR_NAME LENSL_MODULE_NAME
+#define LENSL_BACKLIGHT_NAME LENSL_MODULE_NAME
 
 #define LENSL_HKEY_POLL_KTHREAD_NAME "klensl_hkeyd"
 
@@ -357,6 +359,149 @@ static int bluetooth_init(void)
 	}
 
 	return 0;
+}
+
+/*************************************************************************
+    backlight control - based on video.c
+ *************************************************************************/
+
+/* NB: the reason why this needs to be implemented here is that the SL series
+   uses the ACPI interface for controlling the backlight in a non-standard
+   manner. See http://bugzilla.kernel.org/show_bug.cgi?id=12249  */
+
+struct backlight_device *backlight;
+static struct lensl_vector {
+	int count;
+	int *values;
+} backlight_levels;
+
+static int get_bcl(struct lensl_vector *levels)
+{
+	int i, status;
+	struct acpi_buffer buffer = { ACPI_ALLOCATE_BUFFER, NULL };
+	union acpi_object *o, *obj;
+
+	if (!levels)
+		return -EINVAL;
+	if (levels->count) {
+		levels->count = 0;
+		kfree(levels->values);
+	}
+
+	/* _BCL returns an array sorted from high to low; the first two values
+	   are *not* special (non-standard behavior) */
+	status = acpi_evaluate_object(hkey_handle, "_BCL", NULL, &buffer);
+	if (!ACPI_SUCCESS(status))
+		return status;
+	obj = (union acpi_object *)buffer.pointer;
+	if (!obj || (obj->type != ACPI_TYPE_PACKAGE)) {
+		printk(LENSL_ERR "Invalid _BCL data\n");
+		status = -EFAULT;
+		goto out;
+	}
+
+	levels->count = (int) obj->package.count;
+	if (!levels->count)
+		goto out;
+	levels->values = kmalloc(levels->count * sizeof(int), GFP_KERNEL);
+	if (!levels->values) {
+		printk(KERN_ERR "can't allocate memory\n");
+		status = -ENOMEM;
+		goto out;
+	}
+
+	for (i = 0; i < obj->package.count; i++) {
+		o = (union acpi_object *)&obj->package.elements[i];
+		if (o->type != ACPI_TYPE_INTEGER) {
+			printk(LENSL_ERR "Invalid data\n");
+			goto err;
+		}
+		levels->values[i] = (int) o->integer.value;
+	}
+
+err:
+	levels->count = 0;
+	kfree(levels->values);
+
+out:
+	kfree(buffer.pointer);
+
+	return status;
+}
+
+static inline int set_bcm(int level)
+{
+	/* standard behavior */
+	return lensl_set_acpi_int(hkey_handle, "_BCM", level);
+}
+
+static inline int get_bqc(int *level)
+{
+	/* returns an index into the _BCL package (non-standard behavior) */
+	return lensl_get_acpi_int(hkey_handle, "_BQC", level);
+}
+
+/*backlight device sysfs support*/
+static int lensl_bd_get_brightness(struct backlight_device *bd)
+{
+	int level = 0;
+
+	if (get_bqc(&level))
+		return 0;
+
+	return backlight_levels.count - level - 1;
+}
+
+static int lensl_bd_set_brightness(struct backlight_device *bd)
+{
+	int request_level;
+	if (!bd)
+		return -EINVAL;
+
+	request_level = backlight_levels.count - bd->props.brightness - 1;
+	if (request_level >= 0)
+		return set_bcm(request_level);
+
+	return -EINVAL;
+}
+
+static struct backlight_ops lensl_backlight_ops = {
+	.get_brightness = lensl_bd_get_brightness,
+	.update_status  = lensl_bd_set_brightness,
+};
+
+
+static void backlight_exit(void)
+{
+	backlight_device_unregister(backlight);
+	backlight = NULL;
+	if (backlight_levels.count) {
+		kfree(backlight_levels.values);
+		backlight_levels.count = 0;
+	}
+}
+
+static int
+backlight_init(void)
+{
+	int status;
+
+	backlight_levels.count = 0;
+	backlight_levels.values = NULL;
+	status = get_bcl(&backlight_levels);
+	if (status || !backlight_levels.count)
+		goto err;
+
+	backlight = backlight_device_register(LENSL_BACKLIGHT_NAME,
+			NULL, NULL, &lensl_backlight_ops);
+	backlight->props.max_brightness = backlight_levels.count - 1;
+
+err:
+	if (backlight_levels.count) {
+		kfree(backlight_levels.values);
+		backlight_levels.count = 0;
+	}
+	return status;
 }
 
 /*************************************************************************
@@ -684,6 +829,8 @@ static int __init lenovo_sl_laptop_init(void)
 		return -EIO;
 
 	bluetooth_init();
+	if (control_backlight)
+		backlight_init();
 
 	mutex_init(&hkey_poll_mutex);
 	hkey_poll_start();
@@ -697,12 +844,13 @@ static int __init lenovo_sl_laptop_init(void)
 
 static void __exit lenovo_sl_laptop_exit(void)
 {
+	lenovo_sl_procfs_exit();
 	hkey_poll_stop();
+	backlight_exit();
 	bluetooth_exit();
 	hkey_inputdev_exit();
 	if (lensl_pdev)
 		platform_device_unregister(lensl_pdev);
-	lenovo_sl_procfs_exit();
 	printk(LENSL_INFO "Unloaded Lenovo ThinkPad SL Series Driver\n");
 }
 
