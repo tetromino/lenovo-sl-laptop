@@ -66,6 +66,7 @@ MODULE_LICENSE("GPL");
 
 #define LENSL_EC0 "\\_SB.PCI0.SBRG.EC0"
 #define LENSL_HKEY LENSL_EC0 ".HKEY"
+#define LENSL_LCDD "\\_SB.PCI0.VGA.LCDD"
 
 /* parameters */
 
@@ -369,6 +370,7 @@ static int bluetooth_init(void)
    uses the ACPI interface for controlling the backlight in a non-standard
    manner. See http://bugzilla.kernel.org/show_bug.cgi?id=12249  */
 
+acpi_handle lcdd_handle;
 struct backlight_device *backlight;
 static struct lensl_vector {
 	int count;
@@ -390,7 +392,7 @@ static int get_bcl(struct lensl_vector *levels)
 
 	/* _BCL returns an array sorted from high to low; the first two values
 	   are *not* special (non-standard behavior) */
-	status = acpi_evaluate_object(hkey_handle, "_BCL", NULL, &buffer);
+	status = acpi_evaluate_object(lcdd_handle, "_BCL", NULL, &buffer);
 	if (!ACPI_SUCCESS(status))
 		return status;
 	obj = (union acpi_object *)buffer.pointer;
@@ -400,7 +402,7 @@ static int get_bcl(struct lensl_vector *levels)
 		goto out;
 	}
 
-	levels->count = (int) obj->package.count;
+	levels->count = obj->package.count;
 	if (!levels->count)
 		goto out;
 	levels->values = kmalloc(levels->count * sizeof(int), GFP_KERNEL);
@@ -416,8 +418,9 @@ static int get_bcl(struct lensl_vector *levels)
 			printk(LENSL_ERR "Invalid data\n");
 			goto err;
 		}
-		levels->values[i] = (int) o->integer.value;
+		levels->values[i] = (int)o->integer.value;
 	}
+	goto out;
 
 err:
 	levels->count = 0;
@@ -432,13 +435,13 @@ out:
 static inline int set_bcm(int level)
 {
 	/* standard behavior */
-	return lensl_set_acpi_int(hkey_handle, "_BCM", level);
+	return lensl_set_acpi_int(lcdd_handle, "_BCM", level);
 }
 
 static inline int get_bqc(int *level)
 {
 	/* returns an index into the _BCL package (non-standard behavior) */
-	return lensl_get_acpi_int(hkey_handle, "_BQC", level);
+	return lensl_get_acpi_int(lcdd_handle, "_BQC", level);
 }
 
 /*backlight device sysfs support*/
@@ -488,6 +491,13 @@ backlight_init(void)
 
 	backlight_levels.count = 0;
 	backlight_levels.values = NULL;
+
+	status = acpi_get_handle(NULL, LENSL_LCDD, &lcdd_handle);
+	if (ACPI_FAILURE(status)) {
+		printk(LENSL_ERR "Failed to get ACPI handle for %s\n", LENSL_LCDD);
+		return -EIO;
+	}
+
 	status = get_bcl(&backlight_levels);
 	if (status || !backlight_levels.count)
 		goto err;
