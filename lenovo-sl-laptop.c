@@ -418,7 +418,7 @@ static int get_bcl(struct lensl_vector *levels)
 			printk(LENSL_ERR "Invalid data\n");
 			goto err;
 		}
-		levels->values[i] = (int)o->integer.value;
+		levels->values[i] = (int) o->integer.value;
 	}
 	goto out;
 
@@ -440,7 +440,8 @@ static inline int set_bcm(int level)
 
 static inline int get_bqc(int *level)
 {
-	/* returns an index into the _BCL package (non-standard behavior) */
+	/* returns an index from the bottom into the _BCL package
+	   (non-standard behavior) */
 	return lensl_get_acpi_int(lcdd_handle, "_BQC", level);
 }
 
@@ -452,7 +453,7 @@ static int lensl_bd_get_brightness(struct backlight_device *bd)
 	if (get_bqc(&level))
 		return 0;
 
-	return backlight_levels.count - level - 1;
+	return level;
 }
 
 static int lensl_bd_set_brightness(struct backlight_device *bd)
@@ -462,8 +463,9 @@ static int lensl_bd_set_brightness(struct backlight_device *bd)
 		return -EINVAL;
 
 	request_level = backlight_levels.count - bd->props.brightness - 1;
-	if (request_level >= 0)
-		return set_bcm(request_level);
+	if (request_level >= 0 && request_level < backlight_levels.count) {
+		return set_bcm(backlight_levels.values[request_level]);
+	}
 
 	return -EINVAL;
 }
@@ -489,6 +491,7 @@ backlight_init(void)
 {
 	int status;
 
+	backlight = NULL;
 	backlight_levels.count = 0;
 	backlight_levels.values = NULL;
 
@@ -505,6 +508,8 @@ backlight_init(void)
 	backlight = backlight_device_register(LENSL_BACKLIGHT_NAME,
 			NULL, NULL, &lensl_backlight_ops);
 	backlight->props.max_brightness = backlight_levels.count - 1;
+	backlight->props.brightness = lensl_bd_get_brightness(backlight);
+	return 0;
 
 err:
 	if (backlight_levels.count) {
