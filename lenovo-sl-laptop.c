@@ -2,10 +2,10 @@
  *  lenovo-sl-laptop.c - Lenovo ThinkPad SL Series Extras Driver
  *
  *
- *  Copyright (C) 2008-2009 Alexandre Rostovtsev
+ *  Copyright (C) 2008-2009 Alexandre Rostovtsev <tetromino@gmail.com>
  *
- *  Based on thinkpad_acpi.c, eeepc-laptop.c and video.c which are copyright
- *  their respective authors.
+ *  Largely based on thinkpad_acpi.c, eeepc-laptop.c, and video.c which
+ *  are copyright their respective authors.
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -24,7 +24,7 @@
  *
  */
 
-#define LENSL_LAPTOP_VERSION "0.01"
+#define LENSL_LAPTOP_VERSION "0.02"
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -41,17 +41,11 @@
 #include <linux/proc_fs.h>
 
 #define LENSL_MODULE_DESC "Lenovo ThinkPad SL Series Extras Driver"
-#define LENSL_MODULE_NAME "lenovo_sl_laptop"
+#define LENSL_MODULE_NAME "lenovo-sl-laptop"
 
 MODULE_AUTHOR("Alexandre Rostovtsev");
 MODULE_DESCRIPTION(LENSL_MODULE_DESC);
 MODULE_LICENSE("GPL");
-
-#define CONFIG_LENSL_DEBUG 1
-
-#ifdef CONFIG_LENSL_DEBUG
-#define DEFAULT_MESSAGE_LOGLEVEL KERN_DEBUG
-#endif
 
 #define LENSL_ERR KERN_ERR LENSL_MODULE_NAME ": "
 #define LENSL_NOTICE KERN_NOTICE LENSL_MODULE_NAME ": "
@@ -60,7 +54,12 @@ MODULE_LICENSE("GPL");
 
 #define LENSL_HKEY_FILE LENSL_MODULE_NAME
 #define LENSL_DRVR_NAME LENSL_MODULE_NAME
-#define LENSL_BACKLIGHT_NAME LENSL_MODULE_NAME
+
+/* FIXME : we use "thinkpad_screen" for now to ensure compatibility with
+   the xf86-video-intel driver (it checks the name against a fixed list
+   of strings, see i830_lvds.c) but this is obviously suboptimal since
+   this string is usually used by thinkpad_acpi.c */
+#define LENSL_BACKLIGHT_NAME "thinkpad_screen"
 
 #define LENSL_HKEY_POLL_KTHREAD_NAME "klensl_hkeyd"
 
@@ -147,7 +146,7 @@ static int lensl_set_acpi_int(acpi_handle handle, char *pathname, int value)
 	status = acpi_evaluate_object(handle, pathname, &params, NULL);
 	if (ACPI_FAILURE(status))
 		return -EIO;
-	printk(LENSL_DEBUG "ACPI : set %s = %d\n", pathname, value);
+	printk(LENSL_DEBUG "ACPI : %s := %d\n", pathname, value);
 	return 0;
 }
 
@@ -299,7 +298,7 @@ static int lensl_new_rfkill(const unsigned int id,
 	*rfk = rfkill_allocate(&lensl_pdev->dev, rfktype);
 	if (!*rfk) {
 		printk(LENSL_ERR
-			"failed to allocate memory for rfkill class\n");
+			"Failed to allocate memory for rfkill class\n");
 		return -ENOMEM;
 	}
 
@@ -313,7 +312,7 @@ static int lensl_new_rfkill(const unsigned int id,
 	res = rfkill_register(*rfk);
 	if (res < 0) {
 		printk(LENSL_ERR
-			"failed to register %s rfkill switch: %d\n",
+			"Failed to register %s rfkill switch: %d\n",
 			name, res);
 		rfkill_free(*rfk);
 		*rfk = NULL;
@@ -411,7 +410,7 @@ static int get_bcl(struct lensl_vector *levels)
 		goto out;
 	levels->values = kmalloc(levels->count * sizeof(int), GFP_KERNEL);
 	if (!levels->values) {
-		printk(KERN_ERR "can't allocate memory\n");
+		printk(LENSL_ERR "Failed to allocate memory for brightness levels\n");
 		status = -ENOMEM;
 		goto out;
 	}
@@ -419,7 +418,7 @@ static int get_bcl(struct lensl_vector *levels)
 	for (i = 0; i < obj->package.count; i++) {
 		o = (union acpi_object *)&obj->package.elements[i];
 		if (o->type != ACPI_TYPE_INTEGER) {
-			printk(LENSL_ERR "Invalid data\n");
+			printk(LENSL_ERR "Invalid brightness data\n");
 			goto err;
 		}
 		levels->values[i] = (int) o->integer.value;
@@ -682,8 +681,8 @@ static int hkey_poll_kthread(void *data)
 		printk(LENSL_DEBUG "Got hotkey keycode %d\n", keycode);
 
 		/* Special handling for brightness keys. We do it here and not
-		   via an ACPI notifier to prevent possible conflights with
-		   video.c */
+		   via an ACPI notifier in order to prevent possible conflicts
+		   with video.c */
 		if (keycode == KEY_BRIGHTNESSDOWN) {
 			if (control_backlight && backlight) {
 				level = lensl_bd_get_brightness(backlight);
@@ -703,7 +702,7 @@ static int hkey_poll_kthread(void *data)
 		}
 
 		if (keycode != KEY_RESERVED) {
-			/* TODO : handle KEY_UNKNOWN case */
+			/* TODO : maybe handle KEY_UNKNOWN case? */
 			input_report_key(hkey_inputdev, keycode, 1);
 			input_sync(hkey_inputdev);
 			input_report_key(hkey_inputdev, keycode, 0);
@@ -723,7 +722,7 @@ static void hkey_poll_start(void)
 		NULL, LENSL_HKEY_POLL_KTHREAD_NAME);
 	if (IS_ERR(hkey_poll_task)) {
 		hkey_poll_task = NULL;
-		printk(LENSL_ERR "could not create kernel thread for hotkey polling\n");
+		printk(LENSL_ERR "Could not create kernel thread for hotkey polling\n");
 	}
 	mutex_unlock(&hkey_poll_mutex);
 }
@@ -756,7 +755,7 @@ static int hkey_inputdev_init(void)
 
 	hkey_inputdev = input_allocate_device();
 	if (!hkey_inputdev) {
-		printk(LENSL_ERR "Unable to allocate input device\n");
+		printk(LENSL_ERR "Failed to allocate hotkey input device\n");
 		return -ENODEV;
 	}
 	hkey_inputdev->name = "Lenovo ThinkPad SL Series Extra Buttons";
@@ -771,7 +770,7 @@ static int hkey_inputdev_init(void)
 
 	result = input_register_device(hkey_inputdev);
 	if (result) {
-		printk(LENSL_ERR "Unable to register input device\n");
+		printk(LENSL_ERR "Failed to register hotkey input device\n");
 		input_free_device(hkey_inputdev);
 		hkey_inputdev = NULL;
 		return -ENODEV;
@@ -826,14 +825,14 @@ static int lenovo_sl_procfs_init(void)
 
 	proc_dir = proc_mkdir(LENSL_PROC_DIRNAME, acpi_root_dir);
 	if (!proc_dir) {
-		printk(LENSL_ERR "unable to create proc dir acpi/%s/\n", LENSL_PROC_DIRNAME);
+		printk(LENSL_ERR "Failed to create proc dir acpi/%s/\n", LENSL_PROC_DIRNAME);
 		return -ENODEV;
 	}
 	proc_dir->owner = THIS_MODULE;
 	proc_ec = create_proc_read_entry(LENSL_PROC_EC, 0, proc_dir, 
 		lensl_ec_read_procmem, NULL /* client data */);
 	if (!proc_ec) {
-		printk(LENSL_ERR "unable to create proc entry acpi/%s/%s\n",
+		printk(LENSL_ERR "Failed to create proc entry acpi/%s/%s\n",
 			LENSL_PROC_DIRNAME, LENSL_PROC_EC);
 		return -ENODEV;
 	}
@@ -866,7 +865,7 @@ static int __init lenovo_sl_laptop_init(void)
 	if (IS_ERR(lensl_pdev)) {
 		ret = PTR_ERR(lensl_pdev);
 		lensl_pdev = NULL;
-		printk(LENSL_ERR "unable to register platform device\n");
+		printk(LENSL_ERR "Failed to register platform device\n");
 		return ret;
 	}
 
@@ -884,7 +883,7 @@ static int __init lenovo_sl_laptop_init(void)
 	if (debug_ec)
 		lenovo_sl_procfs_init();
 
-	printk(LENSL_INFO "Loaded Lenovo ThinkPad SL Series Driver\n");
+	printk(LENSL_INFO "Loaded Lenovo ThinkPad SL Series driver\n");
 	return 0;
 }
 
@@ -897,7 +896,7 @@ static void __exit lenovo_sl_laptop_exit(void)
 	hkey_inputdev_exit();
 	if (lensl_pdev)
 		platform_device_unregister(lensl_pdev);
-	printk(LENSL_INFO "Unloaded Lenovo ThinkPad SL Series Driver\n");
+	printk(LENSL_INFO "Unloaded Lenovo ThinkPad SL Series driver\n");
 }
 
 module_init(lenovo_sl_laptop_init);
