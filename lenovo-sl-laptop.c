@@ -518,7 +518,7 @@ backlight_init(void)
 			NULL, NULL, &lensl_backlight_ops);
 	backlight->props.max_brightness = backlight_levels.count - 1;
 	backlight->props.brightness = lensl_bd_get_brightness(backlight);
-
+	printk(LENSL_INFO "Started backlight brightness control\n");
 	goto out;
 err:
 	if (backlight_levels.count) {
@@ -904,6 +904,8 @@ static void __exit lenovo_sl_laptop_exit(void)
 		platform_device_unregister(lensl_pdev);
 	printk(LENSL_INFO "Unloaded Lenovo ThinkPad SL Series driver\n");
 }
+
+MODULE_ALIAS("dmi:bvnLENOVO:*:svnLENOVO:*:pvrThinkPad SL*:rvnLENOVO:*");
 
 module_init(lenovo_sl_laptop_init);
 module_exit(lenovo_sl_laptop_exit);
