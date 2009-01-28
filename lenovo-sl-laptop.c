@@ -31,6 +31,7 @@
 #include <linux/version.h>
 #include <linux/init.h>
 #include <linux/acpi.h>
+#include <linux/pci_ids.h>
 #include <linux/rfkill.h>
 #include <linux/backlight.h>
 #include <linux/platform_device.h>
@@ -82,7 +83,7 @@ enum {
 	LENSL_RFK_WWAN_SW_ID,
 };
 
-acpi_handle hkey_handle;
+static acpi_handle hkey_handle;
 static struct platform_device *lensl_pdev;
 
 static int parse_strtoul(const char *buf,
@@ -371,11 +372,8 @@ static int bluetooth_init(void)
    uses the ACPI interface for controlling the backlight in a non-standard
    manner. See http://bugzilla.kernel.org/show_bug.cgi?id=12249  */
 
-#define	ACPI_VIDEO_NOTIFY_INC_BRIGHTNESS	0x86
-#define ACPI_VIDEO_NOTIFY_DEC_BRIGHTNESS	0x87
-
-acpi_handle lcdd_handle;
-struct backlight_device *backlight;
+static acpi_handle lcdd_handle;
+static struct backlight_device *backlight;
 static struct lensl_vector {
 	int count;
 	int *values;
@@ -494,8 +492,7 @@ static void backlight_exit(void)
 	}
 }
 
-static int
-backlight_init(void)
+static int backlight_init(void)
 {
 	int status = 0;
 
@@ -759,9 +756,11 @@ static int hkey_inputdev_init(void)
 		printk(LENSL_ERR "Failed to allocate hotkey input device\n");
 		return -ENODEV;
 	}
-	hkey_inputdev->name = "Lenovo ThinkPad SL Series Extra Buttons";
+	hkey_inputdev->name = "Lenovo ThinkPad SL Series extra buttons";
 	hkey_inputdev->phys = LENSL_HKEY_FILE "/input0";
+	hkey_inputdev->uniq = LENSL_HKEY_FILE;
 	hkey_inputdev->id.bustype = BUS_HOST;
+	hkey_inputdev->id.vendor = PCI_VENDOR_ID_LENOVO;
 	hkey_inputdev->getkeycode = hkey_inputdev_getkeycode;
 	hkey_inputdev->setkeycode = hkey_inputdev_setkeycode;
 	set_bit(EV_KEY, hkey_inputdev->evbit);
