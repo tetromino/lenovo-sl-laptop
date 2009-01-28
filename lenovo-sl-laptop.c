@@ -28,6 +28,7 @@
 
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/version.h>
 #include <linux/init.h>
 #include <linux/acpi.h>
 #include <linux/rfkill.h>
@@ -40,7 +41,7 @@
 
 #include <linux/proc_fs.h>
 
-#define LENSL_MODULE_DESC "Lenovo ThinkPad SL Series Extras Driver"
+#define LENSL_MODULE_DESC "Lenovo ThinkPad SL Series Extras driver"
 #define LENSL_MODULE_NAME "lenovo-sl-laptop"
 
 MODULE_AUTHOR("Alexandre Rostovtsev");
@@ -848,6 +849,11 @@ static int __init lenovo_sl_laptop_init(void)
 {
 	int ret;
 	acpi_status status;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,28)
+	if (!acpi_video_backlight_support())
+		control_backlight = 1;
+#endif
 
 	hkey_handle = NULL;
 
