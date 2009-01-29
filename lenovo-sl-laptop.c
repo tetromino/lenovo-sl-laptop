@@ -71,10 +71,16 @@ MODULE_LICENSE("GPL");
 
 /* parameters */
 
-static int debug_ec = 0; /* present EC debugging interface in procfs */
+static unsigned int dbg_level = KERN_NOTICE;
+static int debug_ec = 0;
 static int control_backlight = 0; /* control the backlight (NB this may conflict with video.c) */
 module_param(debug_ec, bool, S_IRUGO);
+MODULE_PARM_DESC(debug_ec, "Present EC debugging interface in procfs");
 module_param(control_backlight, bool, S_IRUGO);
+MODULE_PARM_DESC(control_backlight,
+	"Control backlight brightness; can conflict with ACPI video driver");
+module_param_named(debug, dbg_level, uint, S_IRUGO);
+MODULE_PARM_DESC(debug, "Set debug level");
 
 /* general */
 
