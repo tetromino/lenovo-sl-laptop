@@ -49,10 +49,19 @@ MODULE_AUTHOR("Alexandre Rostovtsev");
 MODULE_DESCRIPTION(LENSL_MODULE_DESC);
 MODULE_LICENSE("GPL");
 
-#define LENSL_ERR KERN_ERR LENSL_MODULE_NAME ": "
-#define LENSL_NOTICE KERN_NOTICE LENSL_MODULE_NAME ": "
-#define LENSL_INFO KERN_INFO LENSL_MODULE_NAME ": "
-#define LENSL_DEBUG KERN_DEBUG LENSL_MODULE_NAME ": "
+#define LENSL_EMERG      0
+#define LENSL_ALERT      1
+#define LENSL_CRIT       2
+#define LENSL_ERR        3
+#define LENSL_WARNING    4
+#define LENSL_NOTICE     5
+#define LENSL_INFO       6
+#define LENSL_DEBUG      7
+
+#define vdbg_printk(a_dbg_level, format, arg...) \
+	do { if (dbg_level >= a_dbg_level) \
+		printk("<" #a_dbg_level ">" LENSL_MODULE_NAME ": " format, ## arg); \
+	} while (0)
 
 #define LENSL_HKEY_FILE LENSL_MODULE_NAME
 #define LENSL_DRVR_NAME LENSL_MODULE_NAME
@@ -71,7 +80,7 @@ MODULE_LICENSE("GPL");
 
 /* parameters */
 
-static unsigned int dbg_level = KERN_NOTICE;
+static unsigned int dbg_level = LENSL_INFO;
 static int debug_ec = 0;
 static int control_backlight = 0; /* control the backlight (NB this may conflict with video.c) */
 module_param(debug_ec, bool, S_IRUGO);
@@ -135,7 +144,7 @@ static int lensl_get_acpi_int(acpi_handle handle, char *pathname, int *value)
 	if (ACPI_FAILURE(status))
 		return -EIO;
 	*value = (int)ullval;
-	printk(LENSL_DEBUG "ACPI : %s == %d\n", pathname, *value);
+	vdbg_printk(LENSL_DEBUG, "ACPI : %s == %d\n", pathname, *value);
 	return 0;
 }
 
@@ -154,7 +163,7 @@ static int lensl_set_acpi_int(acpi_handle handle, char *pathname, int value)
 	status = acpi_evaluate_object(handle, pathname, &params, NULL);
 	if (ACPI_FAILURE(status))
 		return -EIO;
-	printk(LENSL_DEBUG "ACPI : %s := %d\n", pathname, value);
+	vdbg_printk(LENSL_DEBUG, "ACPI : %s := %d\n", pathname, value);
 	return 0;
 }
 
@@ -305,7 +314,7 @@ static int lensl_new_rfkill(const unsigned int id,
 
 	*rfk = rfkill_allocate(&lensl_pdev->dev, rfktype);
 	if (!*rfk) {
-		printk(LENSL_ERR
+		vdbg_printk(LENSL_ERR,
 			"Failed to allocate memory for rfkill class\n");
 		return -ENOMEM;
 	}
@@ -319,7 +328,7 @@ static int lensl_new_rfkill(const unsigned int id,
 
 	res = rfkill_register(*rfk);
 	if (res < 0) {
-		printk(LENSL_ERR
+		vdbg_printk(LENSL_ERR,
 			"Failed to register %s rfkill switch: %d\n",
 			name, res);
 		rfkill_free(*rfk);
@@ -405,7 +414,7 @@ static int get_bcl(struct lensl_vector *levels)
 		return status;
 	obj = (union acpi_object *)buffer.pointer;
 	if (!obj || (obj->type != ACPI_TYPE_PACKAGE)) {
-		printk(LENSL_ERR "Invalid _BCL data\n");
+		vdbg_printk(LENSL_ERR, "Invalid _BCL data\n");
 		status = -EFAULT;
 		goto out;
 	}
@@ -415,7 +424,7 @@ static int get_bcl(struct lensl_vector *levels)
 		goto out;
 	levels->values = kmalloc(levels->count * sizeof(int), GFP_KERNEL);
 	if (!levels->values) {
-		printk(LENSL_ERR "Failed to allocate memory for brightness levels\n");
+		vdbg_printk(LENSL_ERR, "Failed to allocate memory for brightness levels\n");
 		status = -ENOMEM;
 		goto out;
 	}
@@ -423,7 +432,7 @@ static int get_bcl(struct lensl_vector *levels)
 	for (i = 0; i < obj->package.count; i++) {
 		o = (union acpi_object *)&obj->package.elements[i];
 		if (o->type != ACPI_TYPE_INTEGER) {
-			printk(LENSL_ERR "Invalid brightness data\n");
+			vdbg_printk(LENSL_ERR, "Invalid brightness data\n");
 			goto err;
 		}
 		levels->values[i] = (int) o->integer.value;
@@ -509,7 +518,7 @@ static int backlight_init(void)
 
 	status = acpi_get_handle(NULL, LENSL_LCDD, &lcdd_handle);
 	if (ACPI_FAILURE(status)) {
-		printk(LENSL_ERR "Failed to get ACPI handle for %s\n", LENSL_LCDD);
+		vdbg_printk(LENSL_ERR, "Failed to get ACPI handle for %s\n", LENSL_LCDD);
 		return -EIO;
 	}
 
@@ -521,7 +530,7 @@ static int backlight_init(void)
 			NULL, NULL, &lensl_backlight_ops);
 	backlight->props.max_brightness = backlight_levels.count - 1;
 	backlight->props.brightness = lensl_bd_get_brightness(backlight);
-	printk(LENSL_INFO "Started backlight brightness control\n");
+	vdbg_printk(LENSL_INFO, "Started backlight brightness control\n");
 	goto out;
 err:
 	if (backlight_levels.count) {
@@ -655,7 +664,7 @@ static int hkey_poll_kthread(void *data)
 
 	offset = hkey_ec_get_offset();
 	if (offset < 0) {
-		printk(LENSL_ERR "Failed to read hotkey register offset from EC\n");
+		vdbg_printk(LENSL_WARNING, "Failed to read hotkey register offset from EC\n");
 		hkey_ec_prev_offset = 0;
 	} else
 		hkey_ec_prev_offset = offset;
@@ -671,18 +680,18 @@ static int hkey_poll_kthread(void *data)
 			continue;
 		offset = hkey_ec_get_offset();
 		if (offset < 0) {
-			printk(LENSL_ERR "Failed to read hotkey register offset from EC\n");
+			vdbg_printk(LENSL_WARNING, "Failed to read hotkey register offset from EC\n");
 			continue;
 		}
 		if (offset == hkey_ec_prev_offset)
 			continue;
 
 		if (ec_read(0x0A + offset, &scancode)) {
-			printk(LENSL_ERR "Failed to read hotkey code from EC\n");
+			vdbg_printk(LENSL_WARNING, "Failed to read hotkey code from EC\n");
 			continue;
 		}
 		keycode = ec_scancode_to_keycode(scancode);
-		printk(LENSL_DEBUG "Got hotkey keycode %d\n", keycode);
+		vdbg_printk(LENSL_DEBUG, "Got hotkey keycode %d\n", keycode);
 
 		/* Special handling for brightness keys. We do it here and not
 		   via an ACPI notifier in order to prevent possible conflicts
@@ -726,7 +735,7 @@ static void hkey_poll_start(void)
 		NULL, LENSL_HKEY_POLL_KTHREAD_NAME);
 	if (IS_ERR(hkey_poll_task)) {
 		hkey_poll_task = NULL;
-		printk(LENSL_ERR "Could not create kernel thread for hotkey polling\n");
+		vdbg_printk(LENSL_ERR, "Could not create kernel thread for hotkey polling\n");
 	}
 	mutex_unlock(&hkey_poll_mutex);
 }
@@ -759,7 +768,7 @@ static int hkey_inputdev_init(void)
 
 	hkey_inputdev = input_allocate_device();
 	if (!hkey_inputdev) {
-		printk(LENSL_ERR "Failed to allocate hotkey input device\n");
+		vdbg_printk(LENSL_ERR, "Failed to allocate hotkey input device\n");
 		return -ENODEV;
 	}
 	hkey_inputdev->name = "Lenovo ThinkPad SL Series extra buttons";
@@ -776,7 +785,7 @@ static int hkey_inputdev_init(void)
 
 	result = input_register_device(hkey_inputdev);
 	if (result) {
-		printk(LENSL_ERR "Failed to register hotkey input device\n");
+		vdbg_printk(LENSL_ERR, "Failed to register hotkey input device\n");
 		input_free_device(hkey_inputdev);
 		hkey_inputdev = NULL;
 		return -ENODEV;
@@ -831,14 +840,14 @@ static int lenovo_sl_procfs_init(void)
 
 	proc_dir = proc_mkdir(LENSL_PROC_DIRNAME, acpi_root_dir);
 	if (!proc_dir) {
-		printk(LENSL_ERR "Failed to create proc dir acpi/%s/\n", LENSL_PROC_DIRNAME);
+		vdbg_printk(LENSL_ERR, "Failed to create proc dir acpi/%s/\n", LENSL_PROC_DIRNAME);
 		return -ENODEV;
 	}
 	proc_dir->owner = THIS_MODULE;
 	proc_ec = create_proc_read_entry(LENSL_PROC_EC, 0, proc_dir, 
 		lensl_ec_read_procmem, NULL /* client data */);
 	if (!proc_ec) {
-		printk(LENSL_ERR "Failed to create proc entry acpi/%s/%s\n",
+		vdbg_printk(LENSL_ERR, "Failed to create proc entry acpi/%s/%s\n",
 			LENSL_PROC_DIRNAME, LENSL_PROC_EC);
 		return -ENODEV;
 	}
@@ -867,7 +876,7 @@ static int __init lenovo_sl_laptop_init(void)
 
 	status = acpi_get_handle(NULL, LENSL_HKEY, &hkey_handle);
 	if (ACPI_FAILURE(status)) {
-		printk(LENSL_ERR "Failed to get ACPI handle for %s\n", LENSL_HKEY);
+		vdbg_printk(LENSL_ERR, "Failed to get ACPI handle for %s\n", LENSL_HKEY);
 		return -EIO;
 	}
 
@@ -876,7 +885,7 @@ static int __init lenovo_sl_laptop_init(void)
 	if (IS_ERR(lensl_pdev)) {
 		ret = PTR_ERR(lensl_pdev);
 		lensl_pdev = NULL;
-		printk(LENSL_ERR "Failed to register platform device\n");
+		vdbg_printk(LENSL_ERR, "Failed to register platform device\n");
 		return ret;
 	}
 
@@ -894,7 +903,7 @@ static int __init lenovo_sl_laptop_init(void)
 	if (debug_ec)
 		lenovo_sl_procfs_init();
 
-	printk(LENSL_INFO "Loaded Lenovo ThinkPad SL Series driver\n");
+	vdbg_printk(LENSL_INFO, "Loaded Lenovo ThinkPad SL Series driver\n");
 	return 0;
 }
 
@@ -907,7 +916,7 @@ static void __exit lenovo_sl_laptop_exit(void)
 	hkey_inputdev_exit();
 	if (lensl_pdev)
 		platform_device_unregister(lensl_pdev);
-	printk(LENSL_INFO "Unloaded Lenovo ThinkPad SL Series driver\n");
+	vdbg_printk(LENSL_INFO, "Unloaded Lenovo ThinkPad SL Series driver\n");
 }
 
 MODULE_ALIAS("dmi:bvnLENOVO:*:svnLENOVO:*:pvrThinkPad SL*:rvnLENOVO:*");
