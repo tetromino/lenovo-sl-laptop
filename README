@@ -1,0 +1,39 @@
+lenoso-sl-laptop
+
+This is an experimental driver for the Lenovo ThinkPad SL
+series, since those laptops are currently not supported by
+the thinkpad_acpi driver.
+
+Works: hotkeys and bluetooth
+Experimental: backlight brightness
+Not implemented: hdaps accelerometer
+
+The backlight brightness control is useful because the SL
+series use the ACPI brightness API in a non-standard manner,
+causing buggy behavior with the standard ACPI video module
+backlight control.
+
+To enable the brightness control, load the module with the 
+"control_backlight=1" module parameter (i.e.
+insmod lenovo-sl-laptop.ko control_backlight=1 )
+
+Note that the brightness control will likely conflict with
+the ACPI video driver brightness control. So, if you have
+the ACPI video driver loaded (and you probably do):
+
+echo 0 > /sys/module/video/parameters/brightness_switch_enabled
+insmod lenovo-sl-laptop.ko control_backlight=1
+and then restart X.
+
+Alternatively, you can try to use the "acpi_backlight=vendor"
+kernel boot parameter (recognized by kernel versions 2.6.28
+and higher).
+
+Alternatively alternatively, simply unload the ACPI video
+driver (rmmod video).
+
+
+To build the module for your current kernel, run make.
+Note that you will need to have the sources or headers for 
+your kernel in the correct location (depends on the distro).
+
