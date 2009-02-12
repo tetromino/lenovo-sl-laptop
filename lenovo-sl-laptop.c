@@ -41,6 +41,7 @@
 #include <linux/freezer.h>
 
 #include <linux/proc_fs.h>
+#include <asm/uaccess.h>
 
 #define LENSL_MODULE_DESC "Lenovo ThinkPad SL Series Extras driver"
 #define LENSL_MODULE_NAME "lenovo-sl-laptop"
@@ -798,7 +799,7 @@ static int hkey_inputdev_init(void)
     procfs debugging interface
  *************************************************************************/
 
-#define LENSL_PROC_EC "ec_dump"
+#define LENSL_PROC_EC "ec0"
 #define LENSL_PROC_DIRNAME "lenovo_sl"
 
 static struct proc_dir_entry *proc_dir;
@@ -826,6 +827,28 @@ int lensl_ec_read_procmem(char *buf, char **start, off_t offset,
 	return len;
 }
 
+/* we expect input in the format "%02X %02X", where the first number is
+   the EC register and the second is the value to be written */
+int lensl_ec_write_procmem(struct file *file, const char *buffer,
+                             unsigned long count, void *data)
+{
+	char s[7];
+	unsigned int reg, val;
+
+	if (count > 6)
+		return -EINVAL;
+	memset(s, 0, 7);
+	if(copy_from_user(s, buffer, count))
+		return -EFAULT;
+	if(sscanf(s, "%02X %02X", &reg, &val) < 2)
+		return -EINVAL;
+	if(reg > 255 || val > 255)
+		return -EINVAL;
+	if (ec_write(reg, val))
+		return -EFAULT;
+	return count;
+}
+
 static void lenovo_sl_procfs_exit(void)
 {
 	if (proc_dir) {
@@ -844,13 +867,14 @@ static int lenovo_sl_procfs_init(void)
 		return -ENODEV;
 	}
 	proc_dir->owner = THIS_MODULE;
-	proc_ec = create_proc_read_entry(LENSL_PROC_EC, 0, proc_dir, 
-		lensl_ec_read_procmem, NULL /* client data */);
+	proc_ec = create_proc_entry(LENSL_PROC_EC, 0600, proc_dir);
 	if (!proc_ec) {
 		vdbg_printk(LENSL_ERR, "Failed to create proc entry acpi/%s/%s\n",
 			LENSL_PROC_DIRNAME, LENSL_PROC_EC);
 		return -ENODEV;
 	}
+	proc_ec->read_proc = lensl_ec_read_procmem;
+	proc_ec->write_proc = lensl_ec_write_procmem;
 
 	return 0;
 }
