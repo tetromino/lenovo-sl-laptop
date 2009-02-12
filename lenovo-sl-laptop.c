@@ -59,10 +59,11 @@ MODULE_LICENSE("GPL");
 #define LENSL_INFO       6
 #define LENSL_DEBUG      7
 
-#define vdbg_printk(a_dbg_level, format, arg...) \
+#define vdbg_printk_(a_dbg_level, format, arg...) \
 	do { if (dbg_level >= a_dbg_level) \
 		printk("<" #a_dbg_level ">" LENSL_MODULE_NAME ": " format, ## arg); \
 	} while (0)
+#define vdbg_printk(a_dbg_level, format, arg...) vdbg_printk_(a_dbg_level, format, ## arg)
 
 #define LENSL_HKEY_FILE LENSL_MODULE_NAME
 #define LENSL_DRVR_NAME LENSL_MODULE_NAME
