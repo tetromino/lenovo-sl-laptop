@@ -556,7 +556,8 @@ out:
 #define LENSL_LED_TV_BLINK 0x01
 #define LENSL_LED_TV_DIM   0x100
 
-#define LENSL_LED_TV_NAME "lensl::thinkvantage"
+/* equivalent to the ThinkVantage LED on other ThinkPads */
+#define LENSL_LED_TV_NAME "lensl::lenovocare"
 
 struct {
 	struct led_classdev cdev;

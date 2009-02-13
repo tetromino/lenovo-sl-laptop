@@ -10,7 +10,7 @@ Not implemented: hdaps accelerometer
 
 NB: to make the ThinkVantage LED blink, make sure the LED timer
 trigger is enabled (CONFIG_LEDS_TRIGGERS_TIMER) and do
-echo "timer" > /sys/class/leds/lensl::thinkvantage/triggers
+echo "timer" > /sys/class/leds/lensl::lenovocare/triggers
 
 
 The backlight brightness control is useful because the SL
