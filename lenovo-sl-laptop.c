@@ -75,6 +75,7 @@ MODULE_LICENSE("GPL");
 #define LENSL_BACKLIGHT_NAME "thinkpad_screen"
 
 #define LENSL_HKEY_POLL_KTHREAD_NAME "klensl_hkeyd"
+#define LENSL_WORKQUEUE_NAME "klensl_wq"
 
 #define LENSL_EC0 "\\_SB.PCI0.SBRG.EC0"
 #define LENSL_HKEY LENSL_EC0 ".HKEY"
@@ -120,6 +121,7 @@ static int parse_strtoul(const char *buf,
 }
 
 static struct input_dev *hkey_inputdev;
+static struct workqueue_struct *lensl_wq;
 
 /*************************************************************************
     bluetooth - copied nearly verbatim from thinkpad_acpi.c
@@ -544,6 +546,109 @@ out:
 }
 
 /*************************************************************************
+    LEDs
+ *************************************************************************/
+
+#define LENSL_LED_TV_OFF   0
+#define LENSL_LED_TV_ON    0x02
+#define LENSL_LED_TV_BLINK 0x01
+#define LENSL_LED_TV_DIM   0x100
+
+#define LENSL_LED_TV_NAME "lenovo-sl-laptop:blue:thinkvantage"
+
+struct {
+	struct led_classdev cdev;
+	enum led_brightness brightness;
+	int supported, new_code;
+	struct work_struct work;
+} led_tv;
+
+static inline int set_tvls(int code)
+{
+	return lensl_set_acpi_int(hkey_handle, "TVLS", code);
+}
+
+static void led_tv_worker (struct work_struct *work)
+{
+	if (!led_tv.supported)
+		return;
+	set_tvls(led_tv.new_code);
+	if(led_tv.new_code)
+		led_tv.brightness = LED_FULL;
+	else
+		led_tv.brightness = LED_OFF;
+}
+
+static void led_tv_brightness_set_sysfs (struct led_classdev *led_cdev,
+				enum led_brightness brightness)
+{
+	switch (brightness) {
+	case LED_OFF:
+		led_tv.new_code = LENSL_LED_TV_OFF;
+		break;
+	case LED_FULL:
+		led_tv.new_code = LENSL_LED_TV_ON;
+		break;
+	default:
+		return;
+	}
+	queue_work(lensl_wq, &led_tv.work);
+}
+
+static enum led_brightness led_tv_brightness_get_sysfs(struct led_classdev *led_cdev)
+{
+	return led_tv.brightness;
+}
+
+static int led_tv_blink_set_sysfs (struct led_classdev *led_cdev,
+			unsigned long *delay_on, unsigned long *delay_off)
+{
+	if (*delay_on == 0 && *delay_off == 0) {
+		/* If we can choose the flash rate, use dimmed blinking -- it looks better */
+		led_tv.new_code = LENSL_LED_TV_ON | LENSL_LED_TV_BLINK | LENSL_LED_TV_DIM;
+		*delay_on = 2000;
+		*delay_off = 2000;
+	} else if (*delay_on + *delay_off == 4000) {
+		/* User wants dimmed blinking */
+		led_tv.new_code = LENSL_LED_TV_ON | LENSL_LED_TV_BLINK | LENSL_LED_TV_DIM;
+	} else if (*delay_on == 7250 && *delay_off == 500) {
+		/* User wants standard blinking mode */
+		led_tv.new_code = LENSL_LED_TV_ON | LENSL_LED_TV_BLINK;
+	} else
+		return -EINVAL;
+	queue_work(lensl_wq, &led_tv.work);
+	return 0;
+}
+
+static void led_exit(void)
+{
+	if (led_tv.supported) {
+		led_classdev_unregister(&led_tv.cdev);
+		led_tv.supported = 0;
+		set_tvls(LENSL_LED_TV_OFF);
+	}
+}
+
+static int led_init (void)
+{
+	int res;
+
+	memset (&led_tv, 0, sizeof(led_tv));
+	led_tv.cdev.brightness_get = led_tv_brightness_get_sysfs;
+	led_tv.cdev.brightness_set = led_tv_brightness_set_sysfs;
+	led_tv.cdev.blink_set = led_tv_blink_set_sysfs;
+	led_tv.cdev.name = LENSL_LED_TV_NAME;
+	INIT_WORK(&led_tv.work, led_tv_worker);
+	set_tvls(LENSL_LED_TV_OFF);
+	res = led_classdev_register(&lensl_pdev->dev, &led_tv.cdev);
+	if (res) {
+		vdbg_printk(LENSL_WARNING, "Failed to register LED device\n");
+		return res;
+	}
+	led_tv.supported = 1;
+	return 0;
+}
+/*************************************************************************
     hotkeys
  *************************************************************************/
 
@@ -899,6 +1004,12 @@ static int __init lenovo_sl_laptop_init(void)
 	if (acpi_disabled)
 		return -ENODEV;
 
+	lensl_wq = create_singlethread_workqueue(LENSL_WORKQUEUE_NAME);
+	if (!lensl_wq) {
+		vdbg_printk(LENSL_ERR, "Failed to create a workqueue\n");
+		return -EFAULT;
+	}
+
 	status = acpi_get_handle(NULL, LENSL_HKEY, &hkey_handle);
 	if (ACPI_FAILURE(status)) {
 		vdbg_printk(LENSL_ERR, "Failed to get ACPI handle for %s\n", LENSL_HKEY);
@@ -922,6 +1033,7 @@ static int __init lenovo_sl_laptop_init(void)
 	if (control_backlight)
 		backlight_init();
 
+	led_init();
 	mutex_init(&hkey_poll_mutex);
 	hkey_poll_start();
 
@@ -936,11 +1048,13 @@ static void __exit lenovo_sl_laptop_exit(void)
 {
 	lenovo_sl_procfs_exit();
 	hkey_poll_stop();
+	led_exit();
 	backlight_exit();
 	bluetooth_exit();
 	hkey_inputdev_exit();
 	if (lensl_pdev)
 		platform_device_unregister(lensl_pdev);
+	destroy_workqueue(lensl_wq);
 	vdbg_printk(LENSL_INFO, "Unloaded Lenovo ThinkPad SL Series driver\n");
 }
 
