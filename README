@@ -8,7 +8,7 @@ Works: hotkeys, bluetooth, the ThinkVantage LED
 Experimental: backlight brightness
 Not implemented: hdaps accelerometer
 
-NB: to make the ThinkPad LED blink, make sure the LED timer
+NB: to make the ThinkVantage LED blink, make sure the LED timer
 trigger is enabled (CONFIG_LEDS_TRIGGERS_TIMER) and do
 echo "timer" > /sys/class/leds/lensl::thinkvantage/triggers
 
