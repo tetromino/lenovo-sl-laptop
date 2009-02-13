@@ -554,7 +554,7 @@ out:
 #define LENSL_LED_TV_BLINK 0x01
 #define LENSL_LED_TV_DIM   0x100
 
-#define LENSL_LED_TV_NAME "lenovo-sl-laptop:blue:thinkvantage"
+#define LENSL_LED_TV_NAME "lensl::thinkvantage"
 
 struct {
 	struct led_classdev cdev;
