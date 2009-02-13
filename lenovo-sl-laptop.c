@@ -549,6 +549,8 @@ out:
     LEDs
  *************************************************************************/
 
+#ifdef CONFIG_LEDS_CLASS
+
 #define LENSL_LED_TV_OFF   0
 #define LENSL_LED_TV_ON    0x02
 #define LENSL_LED_TV_BLINK 0x01
@@ -648,6 +650,20 @@ static int led_init (void)
 	led_tv.supported = 1;
 	return 0;
 }
+
+#else /* CONFIG_LEDS_CLASS */
+
+static void led_exit (void)
+{
+}
+
+static int led_init (void)
+{
+	return -ENODEV;
+}
+
+#endif /* CONFIG_LEDS_CLASS */
+
 /*************************************************************************
     hotkeys
  *************************************************************************/
