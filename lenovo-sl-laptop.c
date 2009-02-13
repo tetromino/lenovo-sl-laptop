@@ -549,7 +549,7 @@ out:
     LEDs
  *************************************************************************/
 
-#ifdef CONFIG_LEDS_CLASS
+#ifdef CONFIG_NEW_LEDS
 
 #define LENSL_LED_TV_OFF   0
 #define LENSL_LED_TV_ON    0x02
@@ -652,7 +652,7 @@ static int led_init (void)
 	return 0;
 }
 
-#else /* CONFIG_LEDS_CLASS */
+#else /* CONFIG_NEW_LEDS */
 
 static void led_exit (void)
 {
@@ -663,7 +663,7 @@ static int led_init (void)
 	return -ENODEV;
 }
 
-#endif /* CONFIG_LEDS_CLASS */
+#endif /* CONFIG_NEW_LEDS */
 
 /*************************************************************************
     hotkeys
