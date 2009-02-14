@@ -10,7 +10,7 @@ Not implemented: hdaps accelerometer
 
 NB: to make the Lenovo Care LED blink, make sure the LED timer
 trigger is enabled (CONFIG_LEDS_TRIGGERS_TIMER) and do
-echo "timer" > /sys/class/leds/lensl::lenovocare/triggers
+echo "timer" > /sys/class/leds/lensl::lenovocare/trigger
 
 
 The backlight brightness control is useful because the SL
