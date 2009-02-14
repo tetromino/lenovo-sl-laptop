@@ -50,14 +50,16 @@ MODULE_AUTHOR("Alexandre Rostovtsev");
 MODULE_DESCRIPTION(LENSL_MODULE_DESC);
 MODULE_LICENSE("GPL");
 
-#define LENSL_EMERG      0
-#define LENSL_ALERT      1
-#define LENSL_CRIT       2
-#define LENSL_ERR        3
-#define LENSL_WARNING    4
-#define LENSL_NOTICE     5
-#define LENSL_INFO       6
-#define LENSL_DEBUG      7
+enum {
+	LENSL_EMERG = 0,
+	LENSL_ALERT,
+	LENSL_CRIT,
+	LENSL_ERR,
+	LENSL_WARNING,
+	LENSL_NOTICE,
+	LENSL_INFO,
+	LENSL_DEBUG
+};
 
 #define vdbg_printk_(a_dbg_level, format, arg...) \
 	do { if (dbg_level >= a_dbg_level) \
@@ -82,6 +84,8 @@ MODULE_LICENSE("GPL");
 #define LENSL_EC0 "\\_SB.PCI0.SBRG.EC0"
 #define LENSL_HKEY LENSL_EC0 ".HKEY"
 #define LENSL_LCDD "\\_SB.PCI0.VGA.LCDD"
+
+#define LENSL_MAX_ACPI_ARGS 3
 
 /* parameters */
 
@@ -179,6 +183,57 @@ static int lensl_set_acpi_int(acpi_handle handle, char *pathname, int value)
 	if (ACPI_FAILURE(status))
 		return -EIO;
 	vdbg_printk(LENSL_DEBUG, "ACPI : %s := %d\n", pathname, value);
+	return 0;
+}
+
+static int lensl_acpi_int_func(acpi_handle handle, char *pathname, int *ret,
+				int n_arg, ...)
+{
+	acpi_status status;
+	struct acpi_object_list params;
+	union acpi_object in_obj[LENSL_MAX_ACPI_ARGS], out_obj;
+	struct acpi_buffer result, *resultp;
+	int i;
+	va_list ap;
+
+	if (!handle)
+		return -EINVAL;
+	if (n_arg < 0 || n_arg > LENSL_MAX_ACPI_ARGS)
+		return -EINVAL;
+	va_start(ap, n_arg);
+	for (i = 0; i < n_arg; i++) {
+		in_obj[i].integer.value = va_arg(ap, int);
+		in_obj[i].type = ACPI_TYPE_INTEGER;
+	}
+	va_end(ap);
+	params.count = n_arg;
+	params.pointer = in_obj;
+
+	if (ret) {
+		result.length = sizeof(out_obj);
+		result.pointer = &out_obj;
+		resultp = &result;
+	} else
+		resultp = NULL;
+
+	status = acpi_evaluate_object(handle, pathname, &params, resultp);
+	if (ACPI_FAILURE(status))
+		return -EIO;	
+	if (ret)
+		*ret = out_obj.integer.value;
+
+	vdbg_printk(LENSL_DEBUG, "ACPI : %s (", pathname);
+	if (dbg_level >= LENSL_DEBUG) {
+		for (i=0; i<n_arg; i++) {
+			if (i)
+				printk(", ");
+			printk("%d", (int)in_obj[i].integer.value);
+		}
+		printk(")");
+		if (ret)
+			printk(" == %d", *ret);
+		printk("\n");
+	}
 	return 0;
 }
 
@@ -682,6 +737,15 @@ static int led_init(void)
 }
 
 #endif /* CONFIG_NEW_LEDS */
+
+/*************************************************************************
+    fans
+ *************************************************************************/
+
+static inline int get_tach(int num, int *value)
+{
+	return lensl_acpi_int_func(hkey_handle, "TACH", value, 1, num);
+}
 
 /*************************************************************************
     hotkeys
