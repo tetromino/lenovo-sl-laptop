@@ -86,13 +86,21 @@ MODULE_LICENSE("GPL");
 static unsigned int dbg_level = LENSL_INFO;
 static int debug_ec = 0;
 static int control_backlight = 0; /* control the backlight (NB this may conflict with video.c) */
+static int bluetooth_auto_enable = 1;
 module_param(debug_ec, bool, S_IRUGO);
-MODULE_PARM_DESC(debug_ec, "Present EC debugging interface in procfs");
+MODULE_PARM_DESC(debug_ec,
+	"Present EC debugging interface in procfs. WARNING: writing to the "
+	"EC can hang your system and possibly damage your hardware.");
 module_param(control_backlight, bool, S_IRUGO);
 MODULE_PARM_DESC(control_backlight,
 	"Control backlight brightness; can conflict with ACPI video driver");
 module_param_named(debug, dbg_level, uint, S_IRUGO);
-MODULE_PARM_DESC(debug, "Set debug level");
+MODULE_PARM_DESC(debug,
+	"Set debug verbosity level (0 = nothing, 7 = everything)");
+module_param(bluetooth_auto_enable, bool, S_IRUGO);
+MODULE_PARM_DESC(bluetooth_auto_enable,
+	"Automatically enable bluetooth (if supported by hardware) when the "
+	"module is loaded");
 
 /* general */
 
@@ -136,6 +144,7 @@ enum {
 
 static struct rfkill *bluetooth_rfkill;
 static int bluetooth_present;
+static int bluetooth_pretend_blocked;
 
 static int lensl_get_acpi_int(acpi_handle handle, char *pathname, int *value)
 {
@@ -194,11 +203,12 @@ static int bluetooth_get_radiosw(void)
 		return -ENODEV;
 
 	/* WLSW overrides bluetooth in firmware/hardware, reflect that */
-	if (get_wlsw(&value) && !value)
+	if (bluetooth_pretend_blocked || (!get_wlsw(&value) && !value))
 		return RFKILL_STATE_HARD_BLOCKED;
 
 	if (get_gbdc(&value))
 		return -EIO;
+
 
 	return ((value & TP_ACPI_BLUETOOTH_RADIOSSW) != 0) ?
 		RFKILL_STATE_UNBLOCKED : RFKILL_STATE_SOFT_BLOCKED;
@@ -369,12 +379,14 @@ static int bluetooth_init(void)
 	if (res)
 		return res;
 
+	bluetooth_pretend_blocked = !bluetooth_auto_enable;
 	res = lensl_new_rfkill(LENSL_RFK_BLUETOOTH_SW_ID,
 				&bluetooth_rfkill,
 				RFKILL_TYPE_BLUETOOTH,
 				"lensl_bluetooth_sw",
 				bluetooth_rfk_set,
 				bluetooth_rfk_get);
+	bluetooth_pretend_blocked = 0;
 	if (res) {
 		bluetooth_exit();
 		return res;
@@ -922,7 +934,7 @@ static int hkey_inputdev_init(void)
  *************************************************************************/
 
 #define LENSL_PROC_EC "ec0"
-#define LENSL_PROC_DIRNAME "lenovo_sl"
+#define LENSL_PROC_DIRNAME LENSL_MODULE_NAME
 
 static struct proc_dir_entry *proc_dir;
 
