@@ -799,7 +799,7 @@ static int hkey_poll_kthread(void *data)
 		t = msleep_interruptible(t);
 		if (unlikely(kthread_should_stop()))
 		 	break;
-		try_to_freeze(); /* FIXME */
+		try_to_freeze();
 		if (t > 0)
 			continue;
 		offset = hkey_ec_get_offset();
@@ -815,7 +815,7 @@ static int hkey_poll_kthread(void *data)
 			continue;
 		}
 		keycode = ec_scancode_to_keycode(scancode);
-		vdbg_printk(LENSL_DEBUG, "Got hotkey keycode %d\n", keycode);
+		vdbg_printk(LENSL_DEBUG, "Got hotkey keycode %d (scancode %d)\n", keycode, scancode);
 
 		/* Special handling for brightness keys. We do it here and not
 		   via an ACPI notifier in order to prevent possible conflicts
@@ -839,7 +839,6 @@ static int hkey_poll_kthread(void *data)
 		}
 
 		if (keycode != KEY_RESERVED) {
-			/* TODO : maybe handle KEY_UNKNOWN case? */
 			input_report_key(hkey_inputdev, keycode, 1);
 			input_sync(hkey_inputdev);
 			input_report_key(hkey_inputdev, keycode, 0);
