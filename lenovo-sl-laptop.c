@@ -209,7 +209,6 @@ static int bluetooth_get_radiosw(void)
 	if (get_gbdc(&value))
 		return -EIO;
 
-
 	return ((value & TP_ACPI_BLUETOOTH_RADIOSSW) != 0) ?
 		RFKILL_STATE_UNBLOCKED : RFKILL_STATE_SOFT_BLOCKED;
 }
@@ -245,7 +244,7 @@ static int bluetooth_set_radiosw(int radio_on, int update_rfk)
 		value |= TP_ACPI_BLUETOOTH_RADIOSSW;
 	else
 		value &= ~TP_ACPI_BLUETOOTH_RADIOSSW;
-	if (!set_sbdc(value))
+	if (set_sbdc(value))
 		return -EIO;
 
 	if (update_rfk)
