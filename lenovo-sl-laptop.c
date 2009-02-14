@@ -41,7 +41,7 @@
 #include <linux/freezer.h>
 
 #include <linux/proc_fs.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #define LENSL_MODULE_DESC "Lenovo ThinkPad SL Series Extras driver"
 #define LENSL_MODULE_NAME "lenovo-sl-laptop"
@@ -61,9 +61,11 @@ MODULE_LICENSE("GPL");
 
 #define vdbg_printk_(a_dbg_level, format, arg...) \
 	do { if (dbg_level >= a_dbg_level) \
-		printk("<" #a_dbg_level ">" LENSL_MODULE_NAME ": " format, ## arg); \
+		printk("<" #a_dbg_level ">" LENSL_MODULE_NAME ": " \
+			format, ## arg); \
 	} while (0)
-#define vdbg_printk(a_dbg_level, format, arg...) vdbg_printk_(a_dbg_level, format, ## arg)
+#define vdbg_printk(a_dbg_level, format, arg...) \
+	vdbg_printk_(a_dbg_level, format, ## arg)
 
 #define LENSL_HKEY_FILE LENSL_MODULE_NAME
 #define LENSL_DRVR_NAME LENSL_MODULE_NAME
@@ -85,7 +87,7 @@ MODULE_LICENSE("GPL");
 
 static unsigned int dbg_level = LENSL_INFO;
 static int debug_ec = 0;
-static int control_backlight = 0; /* control the backlight (NB this may conflict with video.c) */
+static int control_backlight = 0;
 static int bluetooth_auto_enable = 1;
 module_param(debug_ec, bool, S_IRUGO);
 MODULE_PARM_DESC(debug_ec,
@@ -439,7 +441,8 @@ static int get_bcl(struct lensl_vector *levels)
 		goto out;
 	levels->values = kmalloc(levels->count * sizeof(int), GFP_KERNEL);
 	if (!levels->values) {
-		vdbg_printk(LENSL_ERR, "Failed to allocate memory for brightness levels\n");
+		vdbg_printk(LENSL_ERR,
+			"Failed to allocate memory for brightness levels\n");
 		status = -ENOMEM;
 		goto out;
 	}
@@ -492,9 +495,8 @@ static int lensl_bd_set_brightness_int(int request_level)
 {
 	int n;
 	n = backlight_levels.count - request_level - 1;
-	if (n >= 0 && n < backlight_levels.count) {
+	if (n >= 0 && n < backlight_levels.count)
 		return set_bcm(backlight_levels.values[n]);
-	}
 
 	return -EINVAL;
 }
@@ -533,7 +535,8 @@ static int backlight_init(void)
 
 	status = acpi_get_handle(NULL, LENSL_LCDD, &lcdd_handle);
 	if (ACPI_FAILURE(status)) {
-		vdbg_printk(LENSL_ERR, "Failed to get ACPI handle for %s\n", LENSL_LCDD);
+		vdbg_printk(LENSL_ERR,
+			"Failed to get ACPI handle for %s\n", LENSL_LCDD);
 		return -EIO;
 	}
 
@@ -582,18 +585,18 @@ static inline int set_tvls(int code)
 	return lensl_set_acpi_int(hkey_handle, "TVLS", code);
 }
 
-static void led_tv_worker (struct work_struct *work)
+static void led_tv_worker(struct work_struct *work)
 {
 	if (!led_tv.supported)
 		return;
 	set_tvls(led_tv.new_code);
-	if(led_tv.new_code)
+	if (led_tv.new_code)
 		led_tv.brightness = LED_FULL;
 	else
 		led_tv.brightness = LED_OFF;
 }
 
-static void led_tv_brightness_set_sysfs (struct led_classdev *led_cdev,
+static void led_tv_brightness_set_sysfs(struct led_classdev *led_cdev,
 				enum led_brightness brightness)
 {
 	switch (brightness) {
@@ -609,22 +612,26 @@ static void led_tv_brightness_set_sysfs (struct led_classdev *led_cdev,
 	queue_work(lensl_wq, &led_tv.work);
 }
 
-static enum led_brightness led_tv_brightness_get_sysfs(struct led_classdev *led_cdev)
+static enum led_brightness led_tv_brightness_get_sysfs(
+					struct led_classdev *led_cdev)
 {
 	return led_tv.brightness;
 }
 
-static int led_tv_blink_set_sysfs (struct led_classdev *led_cdev,
+static int led_tv_blink_set_sysfs(struct led_classdev *led_cdev,
 			unsigned long *delay_on, unsigned long *delay_off)
 {
 	if (*delay_on == 0 && *delay_off == 0) {
-		/* If we can choose the flash rate, use dimmed blinking -- it looks better */
-		led_tv.new_code = LENSL_LED_TV_ON | LENSL_LED_TV_BLINK | LENSL_LED_TV_DIM;
+		/* If we can choose the flash rate, use dimmed blinking --
+		   it looks better */
+		led_tv.new_code = LENSL_LED_TV_ON |
+			LENSL_LED_TV_BLINK | LENSL_LED_TV_DIM;
 		*delay_on = 2000;
 		*delay_off = 2000;
 	} else if (*delay_on + *delay_off == 4000) {
 		/* User wants dimmed blinking */
-		led_tv.new_code = LENSL_LED_TV_ON | LENSL_LED_TV_BLINK | LENSL_LED_TV_DIM;
+		led_tv.new_code = LENSL_LED_TV_ON |
+			LENSL_LED_TV_BLINK | LENSL_LED_TV_DIM;
 	} else if (*delay_on == 7250 && *delay_off == 500) {
 		/* User wants standard blinking mode */
 		led_tv.new_code = LENSL_LED_TV_ON | LENSL_LED_TV_BLINK;
@@ -643,11 +650,11 @@ static void led_exit(void)
 	}
 }
 
-static int led_init (void)
+static int led_init(void)
 {
 	int res;
 
-	memset (&led_tv, 0, sizeof(led_tv));
+	memset(&led_tv, 0, sizeof(led_tv));
 	led_tv.cdev.brightness_get = led_tv_brightness_get_sysfs;
 	led_tv.cdev.brightness_set = led_tv_brightness_set_sysfs;
 	led_tv.cdev.blink_set = led_tv_blink_set_sysfs;
@@ -665,11 +672,11 @@ static int led_init (void)
 
 #else /* CONFIG_NEW_LEDS */
 
-static void led_exit (void)
+static void led_exit(void)
 {
 }
 
-static int led_init (void)
+static int led_init(void)
 {
 	return -ENODEV;
 }
@@ -681,7 +688,7 @@ static int led_init (void)
  *************************************************************************/
 
 static int hkey_poll_hz = 5;
-static u8 hkey_ec_prev_offset = 0;
+static u8 hkey_ec_prev_offset;
 static struct mutex hkey_poll_mutex;
 static struct task_struct *hkey_poll_task;
 
@@ -717,7 +724,7 @@ static struct key_entry ec_keymap[] = {
 	{KE_KEY, 0x6C, KEY_BRIGHTNESSDOWN /*KEY_RESERVED*/ },
 	/* Fn End; dispatches an ACPI event */
 	{KE_KEY, 0x6D, KEY_BRIGHTNESSUP /*KEY_RESERVED*/ },
-	/* Fn spacebar - zoom */	
+	/* Fn spacebar - zoom */
 	{KE_KEY, 0x71, KEY_ZOOM },
 	/* Lenovo Care key */
 	{KE_KEY, 0x80, KEY_VENDOR },
@@ -735,7 +742,8 @@ static int ec_scancode_to_keycode(u8 scancode)
 	return -EINVAL;
 }
 
-static int hkey_inputdev_getkeycode(struct input_dev *dev, int scancode, int *keycode)
+static int hkey_inputdev_getkeycode(struct input_dev *dev, int scancode,
+					int *keycode)
 {
 	int result;
 
@@ -750,7 +758,8 @@ static int hkey_inputdev_getkeycode(struct input_dev *dev, int scancode, int *ke
 	return result;
 }
 
-static int hkey_inputdev_setkeycode(struct input_dev *dev, int scancode, int keycode)
+static int hkey_inputdev_setkeycode(struct input_dev *dev, int scancode,
+					int keycode)
 {
 	struct key_entry *key;
 
@@ -799,7 +808,8 @@ static int hkey_poll_kthread(void *data)
 
 	offset = hkey_ec_get_offset();
 	if (offset < 0) {
-		vdbg_printk(LENSL_WARNING, "Failed to read hotkey register offset from EC\n");
+		vdbg_printk(LENSL_WARNING,
+			"Failed to read hotkey register offset from EC\n");
 		hkey_ec_prev_offset = 0;
 	} else
 		hkey_ec_prev_offset = offset;
@@ -809,24 +819,27 @@ static int hkey_poll_kthread(void *data)
 			t = 1000/hkey_poll_hz;
 		t = msleep_interruptible(t);
 		if (unlikely(kthread_should_stop()))
-		 	break;
+			break;
 		try_to_freeze();
 		if (t > 0)
 			continue;
 		offset = hkey_ec_get_offset();
 		if (offset < 0) {
-			vdbg_printk(LENSL_WARNING, "Failed to read hotkey register offset from EC\n");
+			vdbg_printk(LENSL_WARNING,
+			   "Failed to read hotkey register offset from EC\n");
 			continue;
 		}
 		if (offset == hkey_ec_prev_offset)
 			continue;
 
 		if (ec_read(0x0A + offset, &scancode)) {
-			vdbg_printk(LENSL_WARNING, "Failed to read hotkey code from EC\n");
+			vdbg_printk(LENSL_WARNING,
+				"Failed to read hotkey code from EC\n");
 			continue;
 		}
 		keycode = ec_scancode_to_keycode(scancode);
-		vdbg_printk(LENSL_DEBUG, "Got hotkey keycode %d (scancode %d)\n", keycode, scancode);
+		vdbg_printk(LENSL_DEBUG,
+		   "Got hotkey keycode %d (scancode %d)\n", keycode, scancode);
 
 		/* Special handling for brightness keys. We do it here and not
 		   via an ACPI notifier in order to prevent possible conflicts
@@ -836,16 +849,14 @@ static int hkey_poll_kthread(void *data)
 				level = lensl_bd_get_brightness(backlight);
 				if (0 <= --level)
 					lensl_bd_set_brightness_int(level);
-			}
-			else
+			} else
 				keycode = KEY_RESERVED;
 		} else if (keycode == KEY_BRIGHTNESSUP) {
 			if (control_backlight && backlight) {
 				level = lensl_bd_get_brightness(backlight);
 				if (backlight_levels.count > ++level)
 					lensl_bd_set_brightness_int(level);
-			}
-			else
+			} else
 				keycode = KEY_RESERVED;
 		}
 
@@ -864,12 +875,14 @@ static int hkey_poll_kthread(void *data)
 
 static void hkey_poll_start(void)
 {
+	hkey_ec_prev_offset = 0;
 	mutex_lock(&hkey_poll_mutex);
 	hkey_poll_task = kthread_run(hkey_poll_kthread,
 		NULL, LENSL_HKEY_POLL_KTHREAD_NAME);
 	if (IS_ERR(hkey_poll_task)) {
 		hkey_poll_task = NULL;
-		vdbg_printk(LENSL_ERR, "Could not create kernel thread for hotkey polling\n");
+		vdbg_printk(LENSL_ERR,
+			"Could not create kernel thread for hotkey polling\n");
 	}
 	mutex_unlock(&hkey_poll_mutex);
 }
@@ -902,7 +915,8 @@ static int hkey_inputdev_init(void)
 
 	hkey_inputdev = input_allocate_device();
 	if (!hkey_inputdev) {
-		vdbg_printk(LENSL_ERR, "Failed to allocate hotkey input device\n");
+		vdbg_printk(LENSL_ERR,
+			"Failed to allocate hotkey input device\n");
 		return -ENODEV;
 	}
 	hkey_inputdev->name = "Lenovo ThinkPad SL Series extra buttons";
@@ -919,7 +933,8 @@ static int hkey_inputdev_init(void)
 
 	result = input_register_device(hkey_inputdev);
 	if (result) {
-		vdbg_printk(LENSL_ERR, "Failed to register hotkey input device\n");
+		vdbg_printk(LENSL_ERR,
+			"Failed to register hotkey input device\n");
 		input_free_device(hkey_inputdev);
 		hkey_inputdev = NULL;
 		return -ENODEV;
@@ -963,7 +978,7 @@ int lensl_ec_read_procmem(char *buf, char **start, off_t offset,
 /* we expect input in the format "%02X %02X", where the first number is
    the EC register and the second is the value to be written */
 int lensl_ec_write_procmem(struct file *file, const char *buffer,
-                             unsigned long count, void *data)
+				unsigned long count, void *data)
 {
 	char s[7];
 	unsigned int reg, val;
@@ -971,11 +986,11 @@ int lensl_ec_write_procmem(struct file *file, const char *buffer,
 	if (count > 6)
 		return -EINVAL;
 	memset(s, 0, 7);
-	if(copy_from_user(s, buffer, count))
+	if (copy_from_user(s, buffer, count))
 		return -EFAULT;
-	if(sscanf(s, "%02X %02X", &reg, &val) < 2)
+	if (sscanf(s, "%02X %02X", &reg, &val) < 2)
 		return -EINVAL;
-	if(reg > 255 || val > 255)
+	if (reg > 255 || val > 255)
 		return -EINVAL;
 	if (ec_write(reg, val))
 		return -EFAULT;
@@ -996,13 +1011,15 @@ static int lenovo_sl_procfs_init(void)
 
 	proc_dir = proc_mkdir(LENSL_PROC_DIRNAME, acpi_root_dir);
 	if (!proc_dir) {
-		vdbg_printk(LENSL_ERR, "Failed to create proc dir acpi/%s/\n", LENSL_PROC_DIRNAME);
+		vdbg_printk(LENSL_ERR,
+		   "Failed to create proc dir acpi/%s/\n", LENSL_PROC_DIRNAME);
 		return -ENODEV;
 	}
 	proc_dir->owner = THIS_MODULE;
 	proc_ec = create_proc_entry(LENSL_PROC_EC, 0600, proc_dir);
 	if (!proc_ec) {
-		vdbg_printk(LENSL_ERR, "Failed to create proc entry acpi/%s/%s\n",
+		vdbg_printk(LENSL_ERR,
+			"Failed to create proc entry acpi/%s/%s\n",
 			LENSL_PROC_DIRNAME, LENSL_PROC_EC);
 		return -ENODEV;
 	}
@@ -1039,7 +1056,8 @@ static int __init lenovo_sl_laptop_init(void)
 
 	status = acpi_get_handle(NULL, LENSL_HKEY, &hkey_handle);
 	if (ACPI_FAILURE(status)) {
-		vdbg_printk(LENSL_ERR, "Failed to get ACPI handle for %s\n", LENSL_HKEY);
+		vdbg_printk(LENSL_ERR,
+			"Failed to get ACPI handle for %s\n", LENSL_HKEY);
 		return -EIO;
 	}
 
