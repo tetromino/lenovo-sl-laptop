@@ -86,8 +86,8 @@ MODULE_LICENSE("GPL");
 /* parameters */
 
 static unsigned int dbg_level = LENSL_INFO;
-static int debug_ec = 0;
-static int control_backlight = 0;
+static int debug_ec;
+static int control_backlight;
 static int bluetooth_auto_enable = 1;
 module_param(debug_ec, bool, S_IRUGO);
 MODULE_PARM_DESC(debug_ec,
