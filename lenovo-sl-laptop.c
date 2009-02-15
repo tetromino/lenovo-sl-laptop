@@ -742,9 +742,19 @@ static int led_init(void)
     fans
  *************************************************************************/
 
-static inline int get_tach(int num, int *value)
+static int get_tach(int num, int *value)
 {
-	return lensl_acpi_int_func(hkey_handle, "TACH", value, 1, num);
+	int status;
+	acpi_handle ec0_handle;
+
+	status = acpi_get_handle(NULL, LENSL_EC0, &ec0_handle);
+	if (ACPI_FAILURE(status)) {
+		vdbg_printk(LENSL_ERR,
+			"Failed to get ACPI handle for %s\n", LENSL_EC0);
+		return -EIO;
+	}
+
+	return lensl_acpi_int_func(ec0_handle, "TACH", value, 1, num);
 }
 
 /*************************************************************************
@@ -1150,6 +1160,11 @@ static int __init lenovo_sl_laptop_init(void)
 		lenovo_sl_procfs_init();
 
 	vdbg_printk(LENSL_INFO, "Loaded Lenovo ThinkPad SL Series driver\n");
+{
+int tach;
+get_tach(0, &tach);
+get_tach(1, &tach);
+}
 	return 0;
 }
 
