@@ -33,6 +33,8 @@
 #include <linux/acpi.h>
 #include <linux/pci_ids.h>
 #include <linux/rfkill.h>
+#include <linux/hwmon.h>
+#include <linux/hwmon-sysfs.h>
 #include <linux/backlight.h>
 #include <linux/platform_device.h>
 
@@ -115,7 +117,7 @@ enum {
 	LENSL_RFK_WWAN_SW_ID,
 };
 
-static acpi_handle hkey_handle;
+static acpi_handle hkey_handle, ec0_handle;
 static struct platform_device *lensl_pdev;
 
 static int parse_strtoul(const char *buf,
@@ -739,22 +741,73 @@ static int led_init(void)
 #endif /* CONFIG_NEW_LEDS */
 
 /*************************************************************************
-    fans
+    hwmon & fans
  *************************************************************************/
+
+static struct device *lensl_hwmon_device;
 
 static int get_tach(int num, int *value)
 {
-	int status;
-	acpi_handle ec0_handle;
+	return lensl_acpi_int_func(ec0_handle, "TACH", value, 1, num);
+}
 
-	status = acpi_get_handle(NULL, LENSL_EC0, &ec0_handle);
-	if (ACPI_FAILURE(status)) {
-		vdbg_printk(LENSL_ERR,
-			"Failed to get ACPI handle for %s\n", LENSL_EC0);
-		return -EIO;
+static ssize_t fan1_input_show(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	int res;
+	int rpm;
+
+	res = get_tach(0, &rpm);
+	if (res)
+		return res;
+	return snprintf(buf, PAGE_SIZE, "%u\n", rpm);
+}
+
+static struct device_attribute dev_attr_fan1_input =
+	__ATTR(fan1_input, S_IRUGO,
+		fan1_input_show, NULL);
+
+static struct attribute *hwmon_attributes[] = {
+	//&dev_attr_fan_pwm1_enable.attr, &dev_attr_fan_pwm1.attr,
+	&dev_attr_fan1_input.attr,
+	NULL
+};
+
+static const struct attribute_group hwmon_attr_group = {
+	.attrs = hwmon_attributes,
+};
+
+static void hwmon_exit(void)
+{
+	if (!lensl_hwmon_device)
+		return;
+
+	sysfs_remove_group(&lensl_hwmon_device->kobj,
+			   &hwmon_attr_group);
+	hwmon_device_unregister(lensl_hwmon_device);
+	lensl_hwmon_device = NULL;
+}
+
+static int hwmon_init(void)
+{
+	int res;
+
+	lensl_hwmon_device = hwmon_device_register(&lensl_pdev->dev);
+	if (!lensl_hwmon_device) {
+		vdbg_printk(LENSL_ERR, "Failed to register hwmon device\n");
+		return -ENODEV;
 	}
 
-	return lensl_acpi_int_func(ec0_handle, "TACH", value, 1, num);
+	res = sysfs_create_group(&lensl_hwmon_device->kobj,
+				 &hwmon_attr_group);
+	if (res < 0) {
+		vdbg_printk(LENSL_ERR, "Failed to create hwmon sysfs group\n");
+		hwmon_device_unregister(lensl_hwmon_device);
+		lensl_hwmon_device = NULL;
+		return -ENODEV;
+	}
+	return 0;
 }
 
 /*************************************************************************
@@ -1117,7 +1170,7 @@ static int __init lenovo_sl_laptop_init(void)
 		control_backlight = 1;
 #endif
 
-	hkey_handle = NULL;
+	hkey_handle = ec0_handle = NULL;
 
 	if (acpi_disabled)
 		return -ENODEV;
@@ -1132,6 +1185,12 @@ static int __init lenovo_sl_laptop_init(void)
 	if (ACPI_FAILURE(status)) {
 		vdbg_printk(LENSL_ERR,
 			"Failed to get ACPI handle for %s\n", LENSL_HKEY);
+		return -EIO;
+	}
+	status = acpi_get_handle(NULL, LENSL_EC0, &ec0_handle);
+	if (ACPI_FAILURE(status)) {
+		vdbg_printk(LENSL_ERR,
+			"Failed to get ACPI handle for %s\n", LENSL_EC0);
 		return -EIO;
 	}
 
@@ -1155,22 +1214,19 @@ static int __init lenovo_sl_laptop_init(void)
 	led_init();
 	mutex_init(&hkey_poll_mutex);
 	hkey_poll_start();
+	hwmon_init();
 
 	if (debug_ec)
 		lenovo_sl_procfs_init();
 
 	vdbg_printk(LENSL_INFO, "Loaded Lenovo ThinkPad SL Series driver\n");
-{
-int tach;
-get_tach(0, &tach);
-get_tach(1, &tach);
-}
 	return 0;
 }
 
 static void __exit lenovo_sl_laptop_exit(void)
 {
 	lenovo_sl_procfs_exit();
+	hwmon_exit();
 	hkey_poll_stop();
 	led_exit();
 	backlight_exit();
