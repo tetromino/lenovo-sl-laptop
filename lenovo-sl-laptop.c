@@ -112,13 +112,10 @@ MODULE_PARM_DESC(bluetooth_auto_enable,
 
 /* general */
 
-enum {
-	LENSL_RFK_BLUETOOTH_SW_ID = 0,
-	LENSL_RFK_WWAN_SW_ID,
-};
-
 static acpi_handle hkey_handle, ec0_handle;
 static struct platform_device *lensl_pdev;
+static struct input_dev *hkey_inputdev;
+static struct workqueue_struct *lensl_wq;
 
 static int parse_strtoul(const char *buf,
 		unsigned long max, unsigned long *value)
@@ -130,58 +127,6 @@ static int parse_strtoul(const char *buf,
 		return res;
 	if (*value > max)
 		return -EINVAL;
-	return 0;
-}
-
-static struct input_dev *hkey_inputdev;
-static struct workqueue_struct *lensl_wq;
-
-/*************************************************************************
-    bluetooth - copied nearly verbatim from thinkpad_acpi.c
- *************************************************************************/
-
-enum {
-	/* ACPI GBDC/SBDC bits */
-	TP_ACPI_BLUETOOTH_HWPRESENT	= 0x01,	/* Bluetooth hw available */
-	TP_ACPI_BLUETOOTH_RADIOSSW	= 0x02,	/* Bluetooth radio enabled */
-	TP_ACPI_BLUETOOTH_UNK		= 0x04,	/* unknown function */
-};
-
-static struct rfkill *bluetooth_rfkill;
-static int bluetooth_present;
-static int bluetooth_pretend_blocked;
-
-static int lensl_get_acpi_int(acpi_handle handle, char *pathname, int *value)
-{
-	acpi_status status;
-	unsigned long long ullval;
-
-	if (!handle)
-		return -EINVAL;
-	status = acpi_evaluate_integer(handle, pathname, NULL, &ullval);
-	if (ACPI_FAILURE(status))
-		return -EIO;
-	*value = (int)ullval;
-	vdbg_printk(LENSL_DEBUG, "ACPI : %s == %d\n", pathname, *value);
-	return 0;
-}
-
-static int lensl_set_acpi_int(acpi_handle handle, char *pathname, int value)
-{
-	acpi_status status;
-	struct acpi_object_list params;
-	union acpi_object in_obj;
-
-	if (!handle)
-		return -EINVAL;
-	in_obj.integer.value = value;
-	in_obj.type = ACPI_TYPE_INTEGER;
-	params.count = 1;
-	params.pointer = &in_obj;
-	status = acpi_evaluate_object(handle, pathname, &params, NULL);
-	if (ACPI_FAILURE(status))
-		return -EIO;
-	vdbg_printk(LENSL_DEBUG, "ACPI : %s := %d\n", pathname, value);
 	return 0;
 }
 
@@ -236,19 +181,39 @@ static int lensl_acpi_int_func(acpi_handle handle, char *pathname, int *ret,
 	return 0;
 }
 
+/*************************************************************************
+    bluetooth - copied nearly verbatim from thinkpad_acpi.c
+ *************************************************************************/
+
+enum {
+	LENSL_RFK_BLUETOOTH_SW_ID = 0,
+	LENSL_RFK_WWAN_SW_ID,
+};
+
+enum {
+	/* ACPI GBDC/SBDC bits */
+	TP_ACPI_BLUETOOTH_HWPRESENT	= 0x01,	/* Bluetooth hw available */
+	TP_ACPI_BLUETOOTH_RADIOSSW	= 0x02,	/* Bluetooth radio enabled */
+	TP_ACPI_BLUETOOTH_UNK		= 0x04,	/* unknown function */
+};
+
+static struct rfkill *bluetooth_rfkill;
+static int bluetooth_present;
+static int bluetooth_pretend_blocked;
+
 static inline int get_wlsw(int *value)
 {
-	return lensl_get_acpi_int(hkey_handle, "WLSW", value);
+	return lensl_acpi_int_func(hkey_handle, "WLSW", value, 0);
 }
 
 static inline int get_gbdc(int *value)
 {
-	return lensl_get_acpi_int(hkey_handle, "GBDC", value);
+	return lensl_acpi_int_func(hkey_handle, "GBDC", value, 0);
 }
 
 static inline int set_sbdc(int value)
 {
-	return lensl_set_acpi_int(hkey_handle, "SBDC", value);
+	return lensl_acpi_int_func(hkey_handle, "SBDC", NULL, 1, value);
 }
 
 static int bluetooth_get_radiosw(void)
@@ -524,14 +489,14 @@ out:
 static inline int set_bcm(int level)
 {
 	/* standard behavior */
-	return lensl_set_acpi_int(lcdd_handle, "_BCM", level);
+	return lensl_acpi_int_func(lcdd_handle, "_BCM", NULL, 1, level);
 }
 
 static inline int get_bqc(int *level)
 {
 	/* returns an index from the bottom into the _BCL package
 	   (non-standard behavior) */
-	return lensl_get_acpi_int(lcdd_handle, "_BQC", level);
+	return lensl_acpi_int_func(lcdd_handle, "_BQC", level, 0);
 }
 
 /* backlight device sysfs support */
@@ -636,7 +601,7 @@ struct {
 
 static inline int set_tvls(int code)
 {
-	return lensl_set_acpi_int(hkey_handle, "TVLS", code);
+	return lensl_acpi_int_func(hkey_handle, "TVLS", NULL, 1, code);
 }
 
 static void led_tv_worker(struct work_struct *work)
