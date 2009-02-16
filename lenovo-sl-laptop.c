@@ -849,6 +849,8 @@ static void hwmon_exit(void)
 			   &hwmon_attr_group);
 	hwmon_device_unregister(lensl_hwmon_device);
 	lensl_hwmon_device = NULL;
+	/* switch fans to automatic mode on module unload */
+	set_sfnv(0, DEFAULT_PWM1);
 }
 
 static int hwmon_init(void)
