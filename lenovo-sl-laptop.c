@@ -1177,7 +1177,7 @@ int lensl_ec_write_procmem(struct file *file, const char *buffer,
 	if (reg > 255 || val > 255)
 		return -EINVAL;
 	if (ec_write(reg, val))
-		return -EFAULT;
+		return -EIO;
 	return count;
 }
 
@@ -1242,13 +1242,13 @@ static int __init lenovo_sl_laptop_init(void)
 	if (ACPI_FAILURE(status)) {
 		vdbg_printk(LENSL_ERR,
 			"Failed to get ACPI handle for %s\n", LENSL_HKEY);
-		return -EIO;
+		return -ENODEV;
 	}
 	status = acpi_get_handle(NULL, LENSL_EC0, &ec0_handle);
 	if (ACPI_FAILURE(status)) {
 		vdbg_printk(LENSL_ERR,
 			"Failed to get ACPI handle for %s\n", LENSL_EC0);
-		return -EIO;
+		return -ENODEV;
 	}
 
 	lensl_pdev = platform_device_register_simple(LENSL_DRVR_NAME, -1,
@@ -1262,7 +1262,7 @@ static int __init lenovo_sl_laptop_init(void)
 
 	ret = hkey_inputdev_init();
 	if (ret)
-		return -EIO;
+		return -ENODEV;
 
 	bluetooth_init();
 	if (control_backlight)
