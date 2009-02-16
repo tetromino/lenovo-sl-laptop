@@ -794,9 +794,9 @@ static ssize_t fan1_input_show(struct device *dev,
 static ssize_t pwm1_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	if (pwm1_value < -1)
-		return -EINVAL;
-	return snprintf(buf, PAGE_SIZE, "%u\n", pwm1_value);
+	if (pwm1_value > -1)
+		return snprintf(buf, PAGE_SIZE, "%u\n", pwm1_value);
+	return -EINVAL;
 }
 
 static ssize_t pwm1_store(struct device *dev,
