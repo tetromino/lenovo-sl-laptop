@@ -52,16 +52,15 @@ MODULE_AUTHOR("Alexandre Rostovtsev");
 MODULE_DESCRIPTION(LENSL_MODULE_DESC);
 MODULE_LICENSE("GPL");
 
-enum {
-	LENSL_EMERG = 0,
-	LENSL_ALERT,
-	LENSL_CRIT,
-	LENSL_ERR,
-	LENSL_WARNING,
-	LENSL_NOTICE,
-	LENSL_INFO,
-	LENSL_DEBUG
-};
+/* #define instead of enum needed for macro */
+#define LENSL_EMERG	0
+#define LENSL_ALERT	1
+#define LENSL_CRIT	2
+#define LENSL_ERR	3
+#define LENSL_WARNING	4
+#define LENSL_NOTICE	5
+#define LENSL_INFO	6
+#define LENSL_DEBUG	7
 
 #define vdbg_printk_(a_dbg_level, format, arg...) \
 	do { if (dbg_level >= a_dbg_level) \
