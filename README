@@ -4,7 +4,7 @@ This is an experimental driver for the Lenovo ThinkPad SL
 series, since those laptops are currently not supported by
 the thinkpad_acpi driver.
 
-Works: hotkeys, bluetooth, the Lenovo Care LED
+Works: hotkeys, bluetooth, the Lenovo Care LED, the fan
 Experimental: backlight brightness
 Not implemented: hdaps accelerometer
 
