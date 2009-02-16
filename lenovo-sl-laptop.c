@@ -1196,7 +1196,7 @@ static int lenovo_sl_procfs_init(void)
 	if (!proc_dir) {
 		vdbg_printk(LENSL_ERR,
 		   "Failed to create proc dir acpi/%s/\n", LENSL_PROC_DIRNAME);
-		return -ENODEV;
+		return -ENOENT;
 	}
 	proc_dir->owner = THIS_MODULE;
 	proc_ec = create_proc_entry(LENSL_PROC_EC, 0600, proc_dir);
@@ -1204,7 +1204,7 @@ static int lenovo_sl_procfs_init(void)
 		vdbg_printk(LENSL_ERR,
 			"Failed to create proc entry acpi/%s/%s\n",
 			LENSL_PROC_DIRNAME, LENSL_PROC_EC);
-		return -ENODEV;
+		return -ENOENT;
 	}
 	proc_ec->read_proc = lensl_ec_read_procmem;
 	proc_ec->write_proc = lensl_ec_write_procmem;
@@ -1234,7 +1234,7 @@ static int __init lenovo_sl_laptop_init(void)
 	lensl_wq = create_singlethread_workqueue(LENSL_WORKQUEUE_NAME);
 	if (!lensl_wq) {
 		vdbg_printk(LENSL_ERR, "Failed to create a workqueue\n");
-		return -EFAULT;
+		return -ENOMEM;
 	}
 
 	status = acpi_get_handle(NULL, LENSL_HKEY, &hkey_handle);
