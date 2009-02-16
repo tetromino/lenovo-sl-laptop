@@ -123,16 +123,13 @@ static struct platform_device *lensl_pdev;
 static int parse_strtoul(const char *buf,
 		unsigned long max, unsigned long *value)
 {
-	char *endp;
+	int res;
 
-	while (*buf && isspace(*buf))
-		buf++;
-	*value = simple_strtoul(buf, &endp, 0);
-	while (*endp && isspace(*endp))
-		endp++;
-	if (*endp || *value > max)
+	res = strict_strtoul(buf, 0, value);
+	if (res)
+		return res;
+	if (*value > max)
 		return -EINVAL;
-
 	return 0;
 }
 
@@ -220,13 +217,13 @@ static int lensl_acpi_int_func(acpi_handle handle, char *pathname, int *ret,
 
 	status = acpi_evaluate_object(handle, pathname, &params, resultp);
 	if (ACPI_FAILURE(status))
-		return -EIO;	
+		return -EIO;
 	if (ret)
 		*ret = out_obj.integer.value;
 
-	vdbg_printk(LENSL_DEBUG, "ACPI : %s (", pathname);
+	vdbg_printk(LENSL_DEBUG, "ACPI : %s(", pathname);
 	if (dbg_level >= LENSL_DEBUG) {
-		for (i=0; i<n_arg; i++) {
+		for (i = 0; i < n_arg; i++) {
 			if (i)
 				printk(", ");
 			printk("%d", (int)in_obj[i].integer.value);
@@ -796,14 +793,14 @@ static ssize_t pwm1_show(struct device *dev,
 {
 	if (pwm1_value > -1)
 		return snprintf(buf, PAGE_SIZE, "%u\n", pwm1_value);
-	return -EINVAL;
+	return -EPERM;
 }
 
 static ssize_t pwm1_store(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
 {
-	int res=0, status;
+	int status, res = 0;
 	unsigned long speed;
 	if (parse_strtoul(buf, 255, &speed))
 		return -EINVAL;
