@@ -395,8 +395,11 @@ static int bluetooth_init(void)
 
 	res = sysfs_create_group(&lensl_pdev->dev.kobj,
 				&bluetooth_attr_group);
-	if (res)
+	if (res) {
+		vdbg_printk(LENSL_ERR,
+			"Failed to register bluetooth sysfs group\n");
 		return res;
+	}
 
 	bluetooth_pretend_blocked = !bluetooth_auto_enable;
 	res = lensl_new_rfkill(LENSL_RFK_BLUETOOTH_SW_ID,
@@ -410,6 +413,7 @@ static int bluetooth_init(void)
 		bluetooth_exit();
 		return res;
 	}
+	vdbg_printk(LENSL_DEBUG, "Initialized bluetooth subdriver\n");
 
 	return 0;
 }
@@ -573,6 +577,8 @@ err:
 		kfree(backlight_levels.values);
 		backlight_levels.count = 0;
 	}
+	vdbg_printk(LENSL_ERR,
+		"Failed to start backlight brightness control\n");
 out:
 	return status;
 }
@@ -685,6 +691,7 @@ static int led_init(void)
 		return res;
 	}
 	led_tv.supported = 1;
+	vdbg_printk(LENSL_DEBUG, "Initialized LED subdriver\n");
 	return 0;
 }
 
@@ -863,6 +870,7 @@ static int hwmon_init(void)
 		lensl_hwmon_device = NULL;
 		return -ENODEV;
 	}
+	vdbg_printk(LENSL_DEBUG, "Initialized hwmon subdriver\n");
 	return 0;
 }
 
@@ -1122,6 +1130,7 @@ static int hkey_inputdev_init(void)
 		hkey_inputdev = NULL;
 		return -ENODEV;
 	}
+	vdbg_printk(LENSL_DEBUG, "Initialized hotkey subdriver\n");
 	return 0;
 }
 
@@ -1208,6 +1217,7 @@ static int lenovo_sl_procfs_init(void)
 	}
 	proc_ec->read_proc = lensl_ec_read_procmem;
 	proc_ec->write_proc = lensl_ec_write_procmem;
+	vdbg_printk(LENSL_DEBUG, "Initialized procfs debugging interface\n");
 
 	return 0;
 }
