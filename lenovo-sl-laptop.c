@@ -745,8 +745,9 @@ static int led_init(void)
  *************************************************************************/
 
 static struct device *lensl_hwmon_device;
-/* next value of pwm1 to allow setting pwm1 before pwm1_enable */
-static int next_pwm1 = -1;
+/* we do not have a reliable way of reading it from ACPI */
+static int pwm1_value = -1;
+/* corresponds to ~2700 rpm */
 #define DEFAULT_PWM1 126
 
 static inline int get_tach(int *value, int fan)
@@ -757,11 +758,6 @@ static inline int get_tach(int *value, int fan)
 static inline int get_decf(int *value)
 {
 	return lensl_acpi_int_func(ec0_handle, "DECF", value, 0);
-}
-
-static inline int get_rfov(int *value, int fan)
-{
-	return lensl_acpi_int_func(ec0_handle, "RFOV", value, 1, fan);
 }
 
 /* speed must be in range 0 .. 255 */
@@ -783,26 +779,6 @@ static int pwm1_enable_get_current(void)
 	return 0;
 }
 
-static int pwm1_get_current(void)
-{
-	int res, speed;
-
-	res = get_rfov(&speed, 0);
-	if (res)
-		return res;
-	if (speed < 0) {
-		vdbg_printk(LENSL_NOTICE,
-			"Unexpectedly low RFOV value: %d\n", speed);
-		speed = 0;
-	}
-	if (speed > 255) {
-		vdbg_printk(LENSL_NOTICE,
-			"Unexpectedly high RFOV value: %d\n", speed);
-		speed = 255;
-	}
-	return speed;
-}
-
 static ssize_t fan1_input_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
@@ -818,12 +794,9 @@ static ssize_t fan1_input_show(struct device *dev,
 static ssize_t pwm1_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	int speed;
-
-	speed = pwm1_get_current();
-	if (speed < 0)
-		return speed;
-	return snprintf(buf, PAGE_SIZE, "%u\n", speed);
+	if (pwm1_value < -1)
+		return -EINVAL;
+	return snprintf(buf, PAGE_SIZE, "%u\n", pwm1_value);
 }
 
 static ssize_t pwm1_store(struct device *dev,
@@ -837,13 +810,13 @@ static ssize_t pwm1_store(struct device *dev,
 	status = pwm1_enable_get_current();
 	if (status < 0)
 		return status;
-	if (status) {
+	if (status > 0)
 		res = set_sfnv(1, speed);
-		next_pwm1 = -1;
-	} else
-		next_pwm1 = speed;
-	
-	return (res) ? res : count;
+
+	if (res)
+		return res;
+	pwm1_value = speed;
+	return count;
 }
 
 static ssize_t pwm1_enable_show(struct device *dev,
@@ -860,28 +833,22 @@ static ssize_t pwm1_enable_store(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
 {
-	int res, status, speed;
-	unsigned long next_status;
-	if (parse_strtoul(buf, 1, &next_status))
+	int res, speed;
+	unsigned long status;
+
+	if (parse_strtoul(buf, 1, &status))
 		return -EINVAL;
-	status = pwm1_enable_get_current();
-	if (status < 0)
-		return status;
-	if (next_status) {
-		if (next_pwm1 > -1)
-			res = set_sfnv(1, next_pwm1);
-		else {
-			speed = pwm1_get_current();
-			if (speed < 0)
-				return speed;
-			res = set_sfnv(1, speed);
-		}
-	} else
-		res = set_sfnv(0, DEFAULT_PWM1);
+
+	if (status && pwm1_value > -1)
+		speed = pwm1_value;
+	else
+		speed = DEFAULT_PWM1;
+
+	res = set_sfnv(status, speed);
 
 	if (res)
 		return res;
-	next_pwm1 = -1;
+	pwm1_value = speed;
 	return count;
 }
 
@@ -914,14 +881,13 @@ static void hwmon_exit(void)
 			   &hwmon_attr_group);
 	hwmon_device_unregister(lensl_hwmon_device);
 	lensl_hwmon_device = NULL;
-	next_pwm1 = -1;
 }
 
 static int hwmon_init(void)
 {
 	int res;
 
-	next_pwm1 = -1;
+	pwm1_value = -1;
 	lensl_hwmon_device = hwmon_device_register(&lensl_pdev->dev);
 	if (!lensl_hwmon_device) {
 		vdbg_printk(LENSL_ERR, "Failed to register hwmon device\n");
