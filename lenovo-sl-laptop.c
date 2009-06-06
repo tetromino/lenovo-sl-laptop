@@ -1209,7 +1209,9 @@ static int lenovo_sl_procfs_init(void)
 		   "Failed to create proc dir acpi/%s/\n", LENSL_PROC_DIRNAME);
 		return -ENOENT;
 	}
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,29)
 	proc_dir->owner = THIS_MODULE;
+#endif
 	proc_ec = create_proc_entry(LENSL_PROC_EC, 0600, proc_dir);
 	if (!proc_ec) {
 		vdbg_printk(LENSL_ERR,
