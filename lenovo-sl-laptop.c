@@ -1308,7 +1308,7 @@ static void __exit lenovo_sl_laptop_exit(void)
 	vdbg_printk(LENSL_INFO, "Unloaded Lenovo ThinkPad SL Series driver\n");
 }
 
-MODULE_ALIAS("dmi:bvnLENOVO:*:svnLENOVO:*:pvrThinkPad SL*:rvnLENOVO:*");
+MODULE_ALIAS("dmi:bvnLENOVO:*:svnLENOVO*:*:pvrThinkPad SL*:rvnLENOVO:*");
 
 module_init(lenovo_sl_laptop_init);
 module_exit(lenovo_sl_laptop_exit);
