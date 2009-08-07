@@ -94,6 +94,7 @@ static unsigned int dbg_level = LENSL_INFO;
 static int debug_ec;
 static int control_backlight;
 static int bluetooth_auto_enable = 1;
+static int wwan_auto_enable = 1;
 module_param(debug_ec, bool, S_IRUGO);
 MODULE_PARM_DESC(debug_ec,
 	"Present EC debugging interface in procfs. WARNING: writing to the "
@@ -107,6 +108,10 @@ MODULE_PARM_DESC(debug,
 module_param(bluetooth_auto_enable, bool, S_IRUGO);
 MODULE_PARM_DESC(bluetooth_auto_enable,
 	"Automatically enable bluetooth (if supported by hardware) when the "
+	"module is loaded");
+module_param(wwan_auto_enable, bool, S_IRUGO);
+MODULE_PARM_DESC(wwan_auto_enable,
+	"Automatically enable WWAN (if supported by hardware) when the "
 	"module is loaded");
 
 /* general */
@@ -181,8 +186,13 @@ static int lensl_acpi_int_func(acpi_handle handle, char *pathname, int *ret,
 }
 
 /*************************************************************************
-    bluetooth - copied nearly verbatim from thinkpad_acpi.c
+    Bluetooth and WWAN - copied nearly verbatim from thinkpad_acpi.c
  *************************************************************************/
+
+typedef enum {
+	LENSL_BLUETOOTH = 0,
+	LENSL_WWAN,
+} btwwan_type;
 
 enum {
 	LENSL_RFK_BLUETOOTH_SW_ID = 0,
@@ -190,15 +200,20 @@ enum {
 };
 
 enum {
-	/* ACPI GBDC/SBDC bits */
-	TP_ACPI_BLUETOOTH_HWPRESENT	= 0x01,	/* Bluetooth hw available */
-	TP_ACPI_BLUETOOTH_RADIOSSW	= 0x02,	/* Bluetooth radio enabled */
-	TP_ACPI_BLUETOOTH_UNK		= 0x04,	/* unknown function */
+	/* ACPI GBDC/SBDC and GWAN/SWAN bits */
+	LENSL_BTWWAN_HWPRESENT = 0x01, /* Bluetooth/WWAN hw available */
+	LENSL_BTWWAN_RADIOSSW  = 0x02, /* Bluetooth/WWAN radio enabled */
+	LENSL_BTWWAN_UNK       = 0x04, /* unknown function */
 };
 
-static struct rfkill *bluetooth_rfkill;
-static int bluetooth_present;
-static int bluetooth_pretend_blocked;
+/* btwwan_rfkill[0] is bluetooth rfkill, btwwan_rfkill[1] is WWAN rfkill etc */
+static struct rfkill *btwwan_rfkill[2];
+static int btwwan_present[2];
+static int btwwan_pretend_blocked[2];
+static char *btwwan_name[2] = {
+	"bluetooth",
+	"WWAN",
+};
 
 static inline int get_wlsw(int *value)
 {
@@ -210,80 +225,110 @@ static inline int get_gbdc(int *value)
 	return lensl_acpi_int_func(hkey_handle, "GBDC", value, 0);
 }
 
+static inline int get_gwan(int *value)
+{
+	return lensl_acpi_int_func(hkey_handle, "GWAN", value, 0);
+}
+
+static int get_gbdcwan(btwwan_type btwwan, int *value)
+{
+	if (btwwan == LENSL_BLUETOOTH)
+		return get_gbdc(value);
+	if (btwwan == LENSL_WWAN)
+		return get_gwan(value);
+	return 0;
+}
+
 static inline int set_sbdc(int value)
 {
 	return lensl_acpi_int_func(hkey_handle, "SBDC", NULL, 1, value);
 }
 
-static int bluetooth_get_radiosw(void)
+static inline int set_swan(int value)
+{
+	return lensl_acpi_int_func(hkey_handle, "SWAN", NULL, 1, value);
+}
+
+static int set_sbdcwan(btwwan_type btwwan, int value)
+{
+	if (btwwan == LENSL_BLUETOOTH)
+		return set_sbdc(value);
+	if (btwwan == LENSL_WWAN)
+		return set_swan(value);
+	return 0;
+}
+
+static int btwwan_get_radiosw(btwwan_type btwwan)
 {
 	int value = 0;
 
-	if (!bluetooth_present)
+	if (!btwwan_present[btwwan])
 		return -ENODEV;
 
-	/* WLSW overrides bluetooth in firmware/hardware, reflect that */
-	if (bluetooth_pretend_blocked || (!get_wlsw(&value) && !value))
+	/* WLSW overrides bluetooth and WWAN in firmware/hardware;
+	   reflect that */
+	if (btwwan_pretend_blocked[btwwan] || (!get_wlsw(&value) && !value))
 		return RFKILL_STATE_HARD_BLOCKED;
 
-	if (get_gbdc(&value))
+	if (get_gbdcwan(btwwan, &value))
 		return -EIO;
 
-	return ((value & TP_ACPI_BLUETOOTH_RADIOSSW) != 0) ?
+	return ((value & LENSL_BTWWAN_RADIOSSW) != 0) ?
 		RFKILL_STATE_UNBLOCKED : RFKILL_STATE_SOFT_BLOCKED;
 }
 
-static void bluetooth_update_rfk(void)
+static void btwwan_update_rfk(btwwan_type btwwan)
 {
 	int result;
 
-	if (!bluetooth_rfkill)
+	if (!btwwan_rfkill[btwwan])
 		return;
 
-	result = bluetooth_get_radiosw();
+	result = btwwan_get_radiosw(btwwan);
 	if (result < 0)
 		return;
-	rfkill_force_state(bluetooth_rfkill, result);
+	rfkill_force_state(btwwan_rfkill[btwwan], result);
 }
 
-static int bluetooth_set_radiosw(int radio_on, int update_rfk)
+static int btwwan_set_radiosw(btwwan_type btwwan, int radio_on, int update_rfk)
 {
 	int value;
 
-	if (!bluetooth_present)
+	if (!btwwan_present[btwwan])
 		return -ENODEV;
 
-	/* WLSW overrides bluetooth in firmware/hardware, but there is no
-	 * reason to risk weird behaviour. */
+	/* WLSW overrides bluetooth and WWAN in firmware/hardware,
+	   but there is no reason to risk weird behaviour. */
 	if (get_wlsw(&value) && !value && radio_on)
 		return -EPERM;
 
-	if (get_gbdc(&value))
+	if (get_gbdcwan(btwwan, &value))
 		return -EIO;
 	if (radio_on)
-		value |= TP_ACPI_BLUETOOTH_RADIOSSW;
+		value |= LENSL_BTWWAN_RADIOSSW;
 	else
-		value &= ~TP_ACPI_BLUETOOTH_RADIOSSW;
-	if (set_sbdc(value))
+		value &= ~LENSL_BTWWAN_RADIOSSW;
+
+	if (set_sbdcwan(btwwan, value))
 		return -EIO;
 
 	if (update_rfk)
-		bluetooth_update_rfk();
+		btwwan_update_rfk(btwwan);
 
 	return 0;
 }
 
 /*************************************************************************
-    bluetooth sysfs - copied nearly verbatim from thinkpad_acpi.c
+    Bluetooth and WWAN sysfs - copied nearly verbatim from thinkpad_acpi.c
  *************************************************************************/
 
-static ssize_t bluetooth_enable_show(struct device *dev,
+static ssize_t btwwan_enable_show(btwwan_type btwwan, struct device *dev,
 			   struct device_attribute *attr,
 			   char *buf)
 {
 	int status;
 
-	status = bluetooth_get_radiosw();
+	status = btwwan_get_radiosw(btwwan);
 	if (status < 0)
 		return status;
 
@@ -291,7 +336,21 @@ static ssize_t bluetooth_enable_show(struct device *dev,
 			(status == RFKILL_STATE_UNBLOCKED) ? 1 : 0);
 }
 
-static ssize_t bluetooth_enable_store(struct device *dev,
+static ssize_t bluetooth_enable_show(struct device *dev,
+			   struct device_attribute *attr,
+			   char *buf)
+{
+	return btwwan_enable_show(LENSL_BLUETOOTH, dev, attr, buf);
+}
+
+static ssize_t wwan_enable_show(struct device *dev,
+			   struct device_attribute *attr,
+			   char *buf)
+{
+	return btwwan_enable_show(LENSL_WWAN, dev, attr, buf);
+}
+
+static ssize_t btwwan_enable_store(btwwan_type btwwan, struct device *dev,
 			    struct device_attribute *attr,
 			    const char *buf, size_t count)
 {
@@ -301,27 +360,55 @@ static ssize_t bluetooth_enable_store(struct device *dev,
 	if (parse_strtoul(buf, 1, &t))
 		return -EINVAL;
 
-	res = bluetooth_set_radiosw(t, 1);
+	res = btwwan_set_radiosw(btwwan, t, 1);
 
 	return (res) ? res : count;
 }
 
+static ssize_t bluetooth_enable_store(struct device *dev,
+			    struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	return btwwan_enable_store(LENSL_BLUETOOTH, dev, attr, buf, count);
+}
+
+static ssize_t wwan_enable_store(struct device *dev,
+			    struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	return btwwan_enable_store(LENSL_WWAN, dev, attr, buf, count);
+}
+
 static struct device_attribute dev_attr_bluetooth_enable =
-	__ATTR(bluetooth_enable, S_IWUSR | S_IRUGO,
+	__ATTR(btwwan_enable[LENSL_BLUETOOTH], S_IWUSR | S_IRUGO,
 		bluetooth_enable_show, bluetooth_enable_store);
+
+static struct device_attribute dev_attr_wwan_enable =
+	__ATTR(btwwan_enable[LENSL_WAN], S_IWUSR | S_IRUGO,
+		wwan_enable_show, wwan_enable_store);
 
 static struct attribute *bluetooth_attributes[] = {
 	&dev_attr_bluetooth_enable.attr,
 	NULL
 };
 
-static const struct attribute_group bluetooth_attr_group = {
-	.attrs = bluetooth_attributes,
+static struct attribute *wwan_attributes[] = {
+	&dev_attr_wwan_enable.attr,
+	NULL
 };
 
-static int bluetooth_rfk_get(void *data, enum rfkill_state *state)
+static const struct attribute_group btwwan_attr_group[2] = {
+	{
+		.attrs = bluetooth_attributes,
+	},
+	{
+		.attrs = wwan_attributes,
+	}
+};
+
+static int btwwan_rfk_get(btwwan_type btwwan, void *data, enum rfkill_state *state)
 {
-	int bts = bluetooth_get_radiosw();
+	int bts = btwwan_get_radiosw(btwwan);
 
 	if (bts < 0)
 		return bts;
@@ -330,9 +417,24 @@ static int bluetooth_rfk_get(void *data, enum rfkill_state *state)
 	return 0;
 }
 
+static int bluetooth_rfk_get(void *data, enum rfkill_state *state)
+{
+	return btwwan_rfk_get(LENSL_BLUETOOTH, data, state);
+}
+
+static int wwan_rfk_get(void *data, enum rfkill_state *state)
+{
+	return btwwan_rfk_get(LENSL_WWAN, data, state);
+}
+
 static int bluetooth_rfk_set(void *data, enum rfkill_state state)
 {
-	return bluetooth_set_radiosw((state == RFKILL_STATE_UNBLOCKED), 0);
+	return btwwan_set_radiosw(LENSL_BLUETOOTH, (state == RFKILL_STATE_UNBLOCKED), 0);
+}
+
+static int wwan_rfk_set(void *data, enum rfkill_state state)
+{
+	return btwwan_set_radiosw(LENSL_WWAN, (state == RFKILL_STATE_UNBLOCKED), 0);
 }
 
 static int lensl_new_rfkill(const unsigned int id,
@@ -372,48 +474,61 @@ static int lensl_new_rfkill(const unsigned int id,
 	return 0;
 }
 
-static void bluetooth_exit(void)
+static void btwwan_exit(btwwan_type btwwan)
 {
-	if (bluetooth_rfkill)
-		rfkill_unregister(bluetooth_rfkill);
+	if (btwwan_rfkill[btwwan])
+		rfkill_unregister(btwwan_rfkill[btwwan]);
 
 	sysfs_remove_group(&lensl_pdev->dev.kobj,
-			&bluetooth_attr_group);
+			&btwwan_attr_group[btwwan]);
 }
 
-static int bluetooth_init(void)
+static int btwwan_init(btwwan_type btwwan)
 {
 	int value, res;
-	bluetooth_present = 0;
+	btwwan_present[btwwan] = 0;
 	if (!hkey_handle)
 		return -ENODEV;
-	if (get_gbdc(&value))
+	if (get_gbdcwan(btwwan, &value))
 		return -EIO;
-	if (!(value & TP_ACPI_BLUETOOTH_HWPRESENT))
+	if (!(value & LENSL_BTWWAN_HWPRESENT))
 		return -ENODEV;
-	bluetooth_present = 1;
+	btwwan_present[btwwan] = 1;
 
 	res = sysfs_create_group(&lensl_pdev->dev.kobj,
-				&bluetooth_attr_group);
+				&btwwan_attr_group[btwwan]);
 	if (res) {
 		vdbg_printk(LENSL_ERR,
-			"Failed to register bluetooth sysfs group\n");
+			"Failed to register %s sysfs group\n",
+			btwwan_name[btwwan]);
 		return res;
 	}
 
-	bluetooth_pretend_blocked = !bluetooth_auto_enable;
-	res = lensl_new_rfkill(LENSL_RFK_BLUETOOTH_SW_ID,
-				&bluetooth_rfkill,
+	if (btwwan == LENSL_BLUETOOTH) {
+		btwwan_pretend_blocked[btwwan] = !bluetooth_auto_enable;
+		res = lensl_new_rfkill(LENSL_RFK_BLUETOOTH_SW_ID,
+				&btwwan_rfkill[btwwan],
 				RFKILL_TYPE_BLUETOOTH,
 				"lensl_bluetooth_sw",
 				bluetooth_rfk_set,
 				bluetooth_rfk_get);
-	bluetooth_pretend_blocked = 0;
+	} else if (btwwan == LENSL_WWAN) {
+		btwwan_pretend_blocked[btwwan] = !wwan_auto_enable;
+		res = lensl_new_rfkill(LENSL_RFK_WWAN_SW_ID,
+				&btwwan_rfkill[btwwan],
+				RFKILL_TYPE_WWAN,
+				"lensl_wwan_sw",
+				wwan_rfk_set,
+				wwan_rfk_get);
+	}
+
+	btwwan_pretend_blocked[btwwan] = 0;
 	if (res) {
-		bluetooth_exit();
+		btwwan_exit(btwwan);
 		return res;
 	}
-	vdbg_printk(LENSL_DEBUG, "Initialized bluetooth subdriver\n");
+	vdbg_printk(LENSL_DEBUG, "Initialized %s subdriver\n",
+		btwwan_name[btwwan]);
 
 	return 0;
 }
@@ -1277,7 +1392,8 @@ static int __init lenovo_sl_laptop_init(void)
 	if (ret)
 		return -ENODEV;
 
-	bluetooth_init();
+	btwwan_init(LENSL_BLUETOOTH);
+	btwwan_init(LENSL_WWAN);
 	if (control_backlight)
 		backlight_init();
 
@@ -1300,7 +1416,8 @@ static void __exit lenovo_sl_laptop_exit(void)
 	hkey_poll_stop();
 	led_exit();
 	backlight_exit();
-	bluetooth_exit();
+	btwwan_exit(LENSL_WWAN);
+	btwwan_exit(LENSL_BLUETOOTH);
 	hkey_inputdev_exit();
 	if (lensl_pdev)
 		platform_device_unregister(lensl_pdev);

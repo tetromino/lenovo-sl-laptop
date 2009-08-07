@@ -5,7 +5,7 @@ series, since those laptops are currently not supported by
 the thinkpad_acpi driver.
 
 Works: hotkeys, bluetooth, the Lenovo Care LED, the fan
-Experimental: backlight brightness
+Experimental: backlight brightness, WWAN
 Not implemented: hdaps accelerometer
 
 NB: to make the Lenovo Care LED blink, make sure the LED timer
