@@ -39,7 +39,6 @@
 #include <linux/platform_device.h>
 
 #include <linux/input.h>
-#include <linux/kthread.h>
 #include <linux/freezer.h>
 
 #include <linux/proc_fs.h>
@@ -977,11 +976,6 @@ static int hwmon_init(void)
     hotkeys
  *************************************************************************/
 
-static int hkey_poll_hz = 5;
-static u8 hkey_ec_prev_offset;
-static struct mutex hkey_poll_mutex;
-static struct task_struct *hkey_poll_task;
-
 struct key_entry {
 	char type;
 	u8 scancode;
@@ -1067,128 +1061,79 @@ static int hkey_inputdev_setkeycode(struct input_dev *dev, int scancode,
 	return -EINVAL;
 }
 
-static int hkey_ec_get_offset(void)
+static int hkey_action(void *data)
 {
-	/* Hotkey events are stored in EC registers 0x0A .. 0x11
-	 * Address of last event is stored in EC registers 0x12 and
-	 * 0x14; if address is 0x01, last event is in register 0x0A;
-	 * if address is 0x07, last event is in register 0x10;
-	 * if address is 0x00, last event is in register 0x11 */
-
-	u8 offset;
-
-	if (ec_read(0x12, &offset))
+	if (!data)
 		return -EINVAL;
-	if (!offset)
-		offset = 8;
-	offset -= 1;
-	if (offset > 7)
-		return -EINVAL;
-	return offset;
-}
-
-static int hkey_poll_kthread(void *data)
-{
-	unsigned long t = 0;
-	int offset, level;
-	unsigned int keycode;
-	u8 scancode;
-
-	mutex_lock(&hkey_poll_mutex);
-
-	offset = hkey_ec_get_offset();
-	if (offset < 0) {
-		vdbg_printk(LENSL_WARNING,
-			"Failed to read hotkey register offset from EC\n");
-		hkey_ec_prev_offset = 0;
-	} else
-		hkey_ec_prev_offset = offset;
-
-	while (!kthread_should_stop() && hkey_poll_hz) {
-		if (t == 0)
-			t = 1000/hkey_poll_hz;
-		t = msleep_interruptible(t);
-		if (unlikely(kthread_should_stop()))
-			break;
-		try_to_freeze();
-		if (t > 0)
-			continue;
-		offset = hkey_ec_get_offset();
-		if (offset < 0) {
-			vdbg_printk(LENSL_WARNING,
-			   "Failed to read hotkey register offset from EC\n");
-			continue;
-		}
-		if (offset == hkey_ec_prev_offset)
-			continue;
-
-		if (ec_read(0x0A + offset, &scancode)) {
-			vdbg_printk(LENSL_WARNING,
-				"Failed to read hotkey code from EC\n");
-			continue;
-		}
-		keycode = ec_scancode_to_keycode(scancode);
-		vdbg_printk(LENSL_DEBUG,
-		   "Got hotkey keycode %d (scancode %d)\n", keycode, scancode);
-
-		/* Special handling for brightness keys. We do it here and not
-		   via an ACPI notifier in order to prevent possible conflicts
-		   with video.c */
-		if (keycode == KEY_BRIGHTNESSDOWN) {
-			if (control_backlight && backlight) {
-				level = lensl_bd_get_brightness(backlight);
-				if (0 <= --level)
-					lensl_bd_set_brightness_int(level);
-			} else
-				keycode = KEY_RESERVED;
-		} else if (keycode == KEY_BRIGHTNESSUP) {
-			if (control_backlight && backlight) {
-				level = lensl_bd_get_brightness(backlight);
-				if (backlight_levels.count > ++level)
-					lensl_bd_set_brightness_int(level);
-			} else
-				keycode = KEY_RESERVED;
-		}
-
-		if (keycode != KEY_RESERVED) {
-			input_report_key(hkey_inputdev, keycode, 1);
-			input_sync(hkey_inputdev);
-			input_report_key(hkey_inputdev, keycode, 0);
-			input_sync(hkey_inputdev);
-		}
-		hkey_ec_prev_offset = offset;
-	}
-
-	mutex_unlock(&hkey_poll_mutex);
+	input_report_key(hkey_inputdev, *(int *)data, 1);
+	input_sync(hkey_inputdev);
+	input_report_key(hkey_inputdev, *(int *)data, 0);
+	input_sync(hkey_inputdev);
 	return 0;
 }
 
-static void hkey_poll_start(void)
+typedef int (*acpi_ec_query_func) (void *data);
+extern int acpi_ec_add_query_handler(void *ec, u8 query_bit, acpi_handle handle,
+	acpi_ec_query_func func,void *data);
+static int hkey_add(struct acpi_device *device)
 {
-	hkey_ec_prev_offset = 0;
-	mutex_lock(&hkey_poll_mutex);
-	hkey_poll_task = kthread_run(hkey_poll_kthread,
-		NULL, LENSL_HKEY_POLL_KTHREAD_NAME);
-	if (IS_ERR(hkey_poll_task)) {
-		hkey_poll_task = NULL;
-		vdbg_printk(LENSL_ERR,
-			"Could not create kernel thread for hotkey polling\n");
+	int result;
+	struct key_entry *key;
+
+	for (key = ec_keymap; key->type != KE_END; key++) {
+		result = acpi_ec_add_query_handler(
+			acpi_driver_data(device->parent),
+			key->scancode, NULL, hkey_action,
+			&(key->keycode));
+		if (result) {
+			vdbg_printk(LENSL_ERR,
+				"Failed to register hotkey notification.\n");
+			return -ENODEV;
+		}
 	}
-	mutex_unlock(&hkey_poll_mutex);
+	return 0;
 }
 
-static void hkey_poll_stop(void)
+extern void acpi_ec_remove_query_handler(void *ec, u8 query_bit);
+static int hkey_remove(struct acpi_device *device, int type)
 {
-	if (hkey_poll_task) {
-		if (frozen(hkey_poll_task) || freezing(hkey_poll_task))
-			thaw_process(hkey_poll_task);
+	struct key_entry *key;
 
-		kthread_stop(hkey_poll_task);
-		hkey_poll_task = NULL;
-		mutex_lock(&hkey_poll_mutex);
-		/* at this point, the thread did exit */
-		mutex_unlock(&hkey_poll_mutex);
+	for (key = ec_keymap; key->type != KE_END; key++) {
+		acpi_ec_remove_query_handler(acpi_driver_data(device->parent),
+			key->scancode);
 	}
+	return 0;
+}
+
+static const struct acpi_device_id hkey_ids[] = {
+	{"LEN0014",0},
+	{"", 0},
+};
+
+static struct acpi_driver hkey_driver = {
+	.name = "lenovo-sl-laptop-hotkey",
+	.class = "lenovo",
+	.ids = hkey_ids,
+	.ops = {
+		.add = hkey_add,
+		.remove = hkey_remove,
+	},
+};
+
+static void hkey_register_notify(void)
+{
+	int result;
+	result = acpi_bus_register_driver(&hkey_driver);
+	if (result) {
+		vdbg_printk(LENSL_ERR,"Failed to register hotkey driver\n");
+	}
+	return;
+}
+
+static void hkey_unregister_notify(void)
+{
+	acpi_bus_unregister_driver(&hkey_driver);
 }
 
 static void hkey_inputdev_exit(void)
@@ -1381,8 +1326,7 @@ static int __init lenovo_sl_laptop_init(void)
 		backlight_init();
 
 	led_init();
-	mutex_init(&hkey_poll_mutex);
-	hkey_poll_start();
+	hkey_register_notify();
 	hwmon_init();
 
 	if (debug_ec)
@@ -1396,7 +1340,7 @@ static void __exit lenovo_sl_laptop_exit(void)
 {
 	lenovo_sl_procfs_exit();
 	hwmon_exit();
-	hkey_poll_stop();
+	hkey_unregister_notify();
 	led_exit();
 	backlight_exit();
 	radio_exit(LENSL_UWB);
