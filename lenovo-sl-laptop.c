@@ -24,7 +24,7 @@
  *
  */
 
-#define LENSL_LAPTOP_VERSION "0.02"
+#define LENSL_LAPTOP_VERSION "0.03"
 
 #include <linux/module.h>
 #include <linux/kernel.h>
