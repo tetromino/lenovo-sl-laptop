@@ -402,18 +402,20 @@ static int lensl_radio_rfkill_set_block(void *data, bool blocked)
 	return ret;
 }
 
+static struct rfkill_ops rfkops = {
+	NULL,
+	lensl_radio_rfkill_query,
+	lensl_radio_rfkill_set_block,
+};
+
 static int lensl_radio_new_rfkill(struct lensl_radio *radio,
 			struct rfkill **rfk, bool sw_blocked,
 			bool hw_blocked)
 {
-	int res;
-	struct rfkill_ops ops = {NULL,
-		lensl_radio_rfkill_query,
-		lensl_radio_rfkill_set_block,
-	};		
+	int res;		
 		
 	*rfk = rfkill_alloc(radio->rfkname, &lensl_pdev->dev, radio->rfktype,
-			&ops, radio);
+			&rfkops, radio);
 	if (!*rfk) {
 		vdbg_printk(LENSL_ERR,
 			"Failed to allocate memory for rfkill class\n");
