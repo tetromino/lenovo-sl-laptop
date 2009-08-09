@@ -386,20 +386,19 @@ static int lensl_radio_new_rfkill(struct lensl_radio *radio,
 
 static void lensl_radio_rfkill_query(struct rfkill *rfk, void *data)
 {
-	int ret, value, hw_blocked = 0;
-	ret = lensl_radio_get((struct lensl_radio *)data,
-		&hw_blocked, &value);
-	rfkill_set_hw_state(rfk, hw_blocked);
+	int ret, value = 0;
+	ret = get_wlsw(&value);
+	if (ret)
+		return;
+	rfkill_set_hw_state(rfk, !value);
 }
 
 static int lensl_radio_rfkill_set_block(void *data, bool blocked)
 {
 	int ret, hw_blocked = 0;
 	ret = lensl_radio_set_on((struct lensl_radio *)data,
-		&hw_blocked, blocked);
-	/* rfkill spec: return 0 on hard block */
-	if (hw_blocked)
-		return 0;
+		&hw_blocked, !blocked);
+	/* rfkill spec: just return 0 on hard block */
 	return ret;
 }
 
@@ -487,7 +486,7 @@ static void radio_exit(lensl_radio_type type)
 
 static int radio_init(lensl_radio_type type)
 {
-	int value, res, hw_blocked = 0, sw_blocked = 1;
+	int value, res, hw_blocked = 0, sw_blocked;
 
 	if (!hkey_handle)
 		return -ENODEV;
@@ -500,9 +499,15 @@ static int radio_init(lensl_radio_type type)
 		return -ENODEV;
 	lensl_radios[type].present = 1;
 
-	if (*lensl_radios[type].auto_enable
-			&& (value & LENSL_RADIO_RADIOSSW))
+	if (*lensl_radios[type].auto_enable) {
 		sw_blocked = 0;
+		value |= LENSL_RADIO_RADIOSSW;
+		lensl_radios[type].set_acpi(value);
+	} else {
+		sw_blocked = 1;
+		value &= ~LENSL_RADIO_RADIOSSW;
+		lensl_radios[type].set_acpi(value);
+	}
 
 	res = lensl_radio_new_rfkill(&lensl_radios[type], &lensl_radios[type].rfk,
 					sw_blocked, hw_blocked);
