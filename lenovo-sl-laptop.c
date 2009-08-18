@@ -92,6 +92,7 @@ MODULE_LICENSE("GPL");
 static unsigned int dbg_level = LENSL_INFO;
 static int debug_ec;
 static int control_backlight;
+static int userspace_backlight = 1;
 static int bluetooth_auto_enable = 1;
 static int wwan_auto_enable = 1;
 static int uwb_auto_enable = 1;
@@ -102,6 +103,12 @@ MODULE_PARM_DESC(debug_ec,
 module_param(control_backlight, bool, S_IRUGO);
 MODULE_PARM_DESC(control_backlight,
 	"Control backlight brightness; can conflict with ACPI video driver.");
+module_param(userspace_backlight, bool, S_IRUGO);
+/* Setting userspace_backlight_key to 0 is needed to work around an
+   xf86-video-intel bug when kernel mode setting is used. */
+MODULE_PARM_DESC(userspace_backlight,
+	"Rely on userspace to change screen brightness when hotkey is "
+	"pressed.");
 module_param_named(debug, dbg_level, uint, S_IRUGO);
 MODULE_PARM_DESC(debug,
 	"Set debug verbosity level (0 = nothing, 7 = everything).");
@@ -1081,13 +1088,13 @@ static int hkey_action(void *data)
 	   the only way to get brightness hotkeys working in X with intel
 	   video and kernel mode setting. */
 	if (keycode == KEY_BRIGHTNESSDOWN) {
-		if (control_backlight && backlight) {
+		if (!userspace_backlight && control_backlight && backlight) {
 			level = lensl_bd_get_brightness(backlight);
 			if (0 <= --level)
 				lensl_bd_set_brightness_int(level);
 		}
 	} else if (keycode == KEY_BRIGHTNESSUP) {
-		if (control_backlight && backlight) {
+		if (!userspace_backlight && control_backlight && backlight) {
 			level = lensl_bd_get_brightness(backlight);
 			if (backlight_levels.count > ++level)
 			lensl_bd_set_brightness_int(level);
