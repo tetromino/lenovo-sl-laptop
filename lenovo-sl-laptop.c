@@ -1070,12 +1070,37 @@ static int hkey_inputdev_setkeycode(struct input_dev *dev, int scancode,
 
 static int hkey_action(void *data)
 {
+	int keycode;
+	int level;
+
 	if (!data)
 		return -EINVAL;
-	input_report_key(hkey_inputdev, *(int *)data, 1);
-	input_sync(hkey_inputdev);
-	input_report_key(hkey_inputdev, *(int *)data, 0);
-	input_sync(hkey_inputdev);
+	keycode = *(int *)data;
+
+	/* Special handling for brightness keys. Unfortunately, this is
+	   the only way to get brightness hotkeys working in X with intel
+	   video and kernel mode setting. */
+	if (keycode == KEY_BRIGHTNESSDOWN) {
+		if (control_backlight && backlight) {
+			level = lensl_bd_get_brightness(backlight);
+			if (0 <= --level)
+				lensl_bd_set_brightness_int(level);
+		}
+	} else if (keycode == KEY_BRIGHTNESSUP) {
+		if (control_backlight && backlight) {
+			level = lensl_bd_get_brightness(backlight);
+			if (backlight_levels.count > ++level)
+			lensl_bd_set_brightness_int(level);
+		}
+	}
+
+	if (keycode != KEY_RESERVED) {
+	        input_report_key(hkey_inputdev, keycode, 1);
+	        input_sync(hkey_inputdev);
+	        input_report_key(hkey_inputdev, keycode, 0);
+	        input_sync(hkey_inputdev);
+	}
+
 	return 0;
 }
 
