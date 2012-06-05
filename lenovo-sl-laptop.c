@@ -26,6 +26,7 @@
 
 #define LENSL_LAPTOP_VERSION "0.02"
 
+#include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/version.h>
@@ -671,7 +672,7 @@ static int backlight_init(void)
 		goto err;
 
 	backlight = backlight_device_register(LENSL_BACKLIGHT_NAME,
-			NULL, NULL, &lensl_backlight_ops);
+			NULL, NULL, &lensl_backlight_ops, NULL);
 	backlight->props.max_brightness = backlight_levels.count - 1;
 	backlight->props.brightness = lensl_bd_get_brightness(backlight);
 	vdbg_printk(LENSL_INFO, "Started backlight brightness control\n");
