@@ -1188,9 +1188,6 @@ static void hkey_poll_start(void)
 static void hkey_poll_stop(void)
 {
 	if (hkey_poll_task) {
-		if (frozen(hkey_poll_task) || freezing(hkey_poll_task))
-			thaw_process(hkey_poll_task);
-
 		kthread_stop(hkey_poll_task);
 		hkey_poll_task = NULL;
 		mutex_lock(&hkey_poll_mutex);
